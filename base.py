@@ -54,7 +54,7 @@ import sys
 import random
 from typing import Any, Callable, Optional
 from vllm import SamplingParams, EngineArgs, LLMEngine
-
+from transformers import AutoTokenizer
 
 # ── Module-level state (mirrors the JS globals) ──────────────────────────
 
@@ -185,17 +185,90 @@ def load_model(model_path: str, tokenizer_path: str | None = None, enforce_eager
     MODEL_PATH = model_path
     print("Model loaded successfully")
 
+def download_one_file(url: str, dest_path: str) -> None:
+    if os.path.exists(dest_path):
+        print(f"File already exists, skipping download: {dest_path}")
+        return
+    # use curl to download the file
+    import subprocess
+    print(f"Downloading model from URL: {url}")
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    subprocess.run(["curl", "-L", url, "-o", dest_path], check=True)
+
+def download_model_from_url(url: str) -> str:
+    expectedFilename = os.path.basename(url)
+    dest_path = os.path.join("models", expectedFilename)
+    
+    if "-of-" in expectedFilename:
+        totalAmount = int(expectedFilename.split("-of-")[-1])
+        # last 5 characters before the -of- should be the current chunk number, zero-padded to 5 digits
+        currentChunk = int(expectedFilename.split("-of-")[-2][-5:])
+
+        # check NaN
+        if totalAmount <= 0 or currentChunk <= 0:
+            raise ValueError(f"Invalid chunk numbers in URL: {currentChunk}-of-{totalAmount}")
+
+        # check they are integers and currentChunk is not less than 1 and not more than totalAmount
+        if currentChunk < 1 or currentChunk > totalAmount:
+            raise ValueError(f"Invalid chunk number in URL: {currentChunk} (total: {totalAmount})")
+        if totalAmount < 1:
+            raise ValueError(f"Invalid total amount in URL: {totalAmount}")
+        
+        if "-of-" not in dest_path:
+            raise ValueError(f"Destination path must contain '-of-' for chunked downloads: {dest_path}")
+        
+        for chunk_num in range(1, totalAmount + 1):
+            padded_chunk_num = str(chunk_num).zfill(5)
+            chunk_url = url.replace("00001", padded_chunk_num)
+            chunk_dest_path = dest_path.replace("00001", padded_chunk_num)
+            download_one_file(chunk_url, chunk_dest_path)
+    else:
+        download_one_file(url, dest_path)
+
+    print(f"Model downloaded to: {dest_path}")
+    return dest_path
+        
+
+def save_tokenizer(model_path: str, tokenizer_path: str) -> None:
+    # check if tokenizer_path already exists
+    if os.path.exists(tokenizer_path):
+        print(f"Tokenizer path already exists: {tokenizer_path}")
+        return
+
+    print(f"Loading tokenizer from GGUF: {model_path}")
+    print("This will be slow...")
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        os.path.dirname(model_path),
+        gguf_file=os.path.basename(model_path),
+    )
+
+    tokenizer.save_pretrained(tokenizer_path)
+    print(f"Tokenizer saved to: {tokenizer_path}")
 
 def load_config(config_path: str) -> None:
     global CONFIG, CONFIG_PATH
 
     print(f"Loading config: {config_path}")
-    with open(config_path, "r", encoding="utf-8") as f:
-        raw = f.read()
-    # Strip JS-style comments (// …) so json.loads works
-    raw = re.sub(r'//.*', '', raw)
-    CONFIG = json.loads(raw)
-    CONFIG_PATH = config_path
+    if (config_path == "ENV"):
+        env_config = os.environ.get("CONFIG_JSON")
+        if not env_config:
+            raise ValueError("CONFIG_JSON environment variable is not set")
+        try:
+            CONFIG = json.loads(env_config, strict=False)
+            CONFIG_PATH = "ENV"
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in CONFIG_JSON environment variable: {e}")
+    else:
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw = f.read()
+        CONFIG = json.loads(raw, strict=False)
+        CONFIG_PATH = config_path
+
+    # check config is a dict
+    if not isinstance(CONFIG, dict):
+        print(CONFIG)
+        raise ValueError("Invalid config file, expected a JSON object at the top level")
 
     if "standard" not in CONFIG or "analyze" not in CONFIG:
         print(CONFIG)
@@ -205,9 +278,18 @@ def load_config(config_path: str) -> None:
     check_config_validity(CONFIG["analyze"])
     print("Config loaded successfully")
 
-    if (CONFIG.get("modelPath") is None) or not isinstance(CONFIG["modelPath"], str):
-        raise ValueError("Invalid config: modelPath must be a string")
-    
+    if (CONFIG.get("modelUrl") is not None) and not isinstance(CONFIG["modelUrl"], str):
+        raise ValueError("Invalid config: modelUrl must be a string if provided")
+
+    model_url = CONFIG.get("modelUrl", None)
+    if not model_url:
+        if (CONFIG.get("modelPath") is None) or not isinstance(CONFIG["modelPath"], str):
+            raise ValueError("Invalid config: modelPath must be a string")
+    else:
+        # we don't allow modelPath or tokenizerPath when modelUrl is provided, to avoid confusion about where the model is coming from
+        if CONFIG.get("modelPath") is not None:
+            raise ValueError("Invalid config: modelPath should not be provided when modelUrl is used")
+        
     if (CONFIG.get("tokenizerPath") is not None) and not isinstance(CONFIG["tokenizerPath"], str):
         raise ValueError("Invalid config: tokenizerPath must be a string if provided")
     
@@ -217,12 +299,32 @@ def load_config(config_path: str) -> None:
     if not isinstance(CONFIG.get("enforceEager"), bool):
         raise ValueError("Invalid config: enforceEager must be a boolean")
     
+    if CONFIG.get("modelUrl") is not None:
+        CONFIG["modelPath"] = download_model_from_url(CONFIG["modelUrl"])
+
+    if CONFIG.get("tokenizerPath") is not None:
+        save_tokenizer(CONFIG["modelPath"], CONFIG["tokenizerPath"])
+
     if MODEL_PATH != CONFIG["modelPath"]:
         base_dir = os.path.dirname(config_path)
         model_full_path = os.path.normpath(os.path.join(base_dir, CONFIG["modelPath"]))
+
+        if not os.path.exists(model_full_path):
+            model_full_path = CONFIG["modelPath"]  # try as absolute path
+            if not os.path.exists(model_full_path):
+                raise FileNotFoundError(f"Model file not found at: {model_full_path}")
+
+        print(f"Resolved model path: {model_full_path}")
+
         tokenizer_path = None
         if CONFIG.get("tokenizerPath"):
             tokenizer_path = os.path.normpath(os.path.join(base_dir, CONFIG["tokenizerPath"]))
+            if not os.path.exists(tokenizer_path):
+                tokenizer_path = CONFIG["tokenizerPath"]  # try as absolute path
+                if not os.path.exists(tokenizer_path):
+                    raise FileNotFoundError(f"Tokenizer path not found at: {tokenizer_path}")
+        print(f"Resolved tokenizer path: {tokenizer_path}")
+        
         load_model(model_full_path, tokenizer_path=tokenizer_path, enforce_eager=CONFIG.get("enforceEager", True))
 
 
