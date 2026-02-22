@@ -53,12 +53,13 @@ import re
 import sys
 import random
 from typing import Any, Callable, Optional
-from vllm import SamplingParams, EngineArgs, LLMEngine
-from transformers import AutoTokenizer
+from runpod import RunPodLogger
+
+log = RunPodLogger()
 
 # ── Module-level state (mirrors the JS globals) ──────────────────────────
 
-MODEL: Optional[LLMEngine] = None
+MODEL: Optional[Any] = None
 MODEL_PATH: str = ""
 _REQUEST_COUNTER: int = 0
 CONFIG: Optional[dict] = None
@@ -156,15 +157,17 @@ def _next_request_id() -> str:
 
 
 def load_model(model_path: str, tokenizer_path: str | None = None, enforce_eager: bool = True) -> None:
+    from vllm import EngineArgs, LLMEngine
+
     global MODEL, MODEL_PATH
 
-    print(f"Loading model: {model_path}")
+    log.info(f"Loading model: {model_path}")
     if MODEL_PATH == model_path and MODEL is not None:
-        print("Model already loaded")
+        log.info("Model already loaded")
         return
 
     if MODEL is not None:
-        print("Unloading previous model")
+        log.info("Unloading previous model")
         MODEL = None
         MODEL_PATH = ""
 
@@ -177,21 +180,21 @@ def load_model(model_path: str, tokenizer_path: str | None = None, enforce_eager
     )
 
     if tokenizer_path:
-        print(f"Using pre-saved tokenizer: {tokenizer_path}")
+        log.info(f"Using pre-saved tokenizer: {tokenizer_path}")
         engine_kwargs["tokenizer"] = tokenizer_path
 
     engine_args = EngineArgs(**engine_kwargs)
     MODEL = LLMEngine.from_engine_args(engine_args)
     MODEL_PATH = model_path
-    print("Model loaded successfully")
+    log.info("Model loaded successfully")
 
 def download_one_file(url: str, dest_path: str) -> None:
     if os.path.exists(dest_path):
-        print(f"File already exists, skipping download: {dest_path}")
+        log.info(f"File already exists, skipping download: {dest_path}")
         return
     # use curl to download the file
     import subprocess
-    print(f"Downloading model from URL: {url}")
+    log.info(f"Downloading model from URL: {url}")
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     subprocess.run(["curl", "-L", url, "-o", dest_path], check=True)
 
@@ -225,18 +228,20 @@ def download_model_from_url(url: str) -> str:
     else:
         download_one_file(url, dest_path)
 
-    print(f"Model downloaded to: {dest_path}")
+    log.info(f"Model downloaded to: {dest_path}")
     return dest_path
         
 
 def save_tokenizer(model_path: str, tokenizer_path: str) -> None:
+    from transformers import AutoTokenizer
+    
     # check if tokenizer_path already exists
     if os.path.exists(tokenizer_path):
-        print(f"Tokenizer path already exists: {tokenizer_path}")
+        log.info(f"Tokenizer path already exists: {tokenizer_path}")
         return
 
-    print(f"Loading tokenizer from GGUF: {model_path}")
-    print("This will be slow...")
+    log.info(f"Loading tokenizer from GGUF: {model_path}")
+    log.info("This will be slow...")
 
     tokenizer = AutoTokenizer.from_pretrained(
         os.path.dirname(model_path),
@@ -244,12 +249,12 @@ def save_tokenizer(model_path: str, tokenizer_path: str) -> None:
     )
 
     tokenizer.save_pretrained(tokenizer_path)
-    print(f"Tokenizer saved to: {tokenizer_path}")
+    log.info(f"Tokenizer saved to: {tokenizer_path}")
 
 def load_config(config_path: str) -> None:
     global CONFIG, CONFIG_PATH
 
-    print(f"Loading config: {config_path}")
+    log.info(f"Loading config: {config_path}")
     if (config_path == "ENV"):
         env_config = os.environ.get("CONFIG_JSON")
         if not env_config:
@@ -267,16 +272,16 @@ def load_config(config_path: str) -> None:
 
     # check config is a dict
     if not isinstance(CONFIG, dict):
-        print(CONFIG)
+        log.info(CONFIG)
         raise ValueError("Invalid config file, expected a JSON object at the top level")
 
     if "standard" not in CONFIG or "analyze" not in CONFIG:
-        print(CONFIG)
+        log.info(CONFIG)
         raise ValueError("Invalid config file, missing standard or analyze sections")
 
     check_config_validity(CONFIG["standard"])
     check_config_validity(CONFIG["analyze"])
-    print("Config loaded successfully")
+    log.info("Config loaded successfully")
 
     if (CONFIG.get("modelUrl") is not None) and not isinstance(CONFIG["modelUrl"], str):
         raise ValueError("Invalid config: modelUrl must be a string if provided")
@@ -314,7 +319,7 @@ def load_config(config_path: str) -> None:
             if not os.path.exists(model_full_path):
                 raise FileNotFoundError(f"Model file not found at: {model_full_path}")
 
-        print(f"Resolved model path: {model_full_path}")
+        log.info(f"Resolved model path: {model_full_path}")
 
         tokenizer_path = None
         if CONFIG.get("tokenizerPath"):
@@ -323,8 +328,8 @@ def load_config(config_path: str) -> None:
                 tokenizer_path = CONFIG["tokenizerPath"]  # try as absolute path
                 if not os.path.exists(tokenizer_path):
                     raise FileNotFoundError(f"Tokenizer path not found at: {tokenizer_path}")
-        print(f"Resolved tokenizer path: {tokenizer_path}")
-        
+        log.info(f"Resolved tokenizer path: {tokenizer_path}")
+
         load_model(model_full_path, tokenizer_path=tokenizer_path, enforce_eager=CONFIG.get("enforceEager", True))
 
 
@@ -346,7 +351,9 @@ def _make_sampling_params(
     section: dict,
     stop: list[str],
     grammar: str | None = None,
-) -> SamplingParams:
+) -> Any:
+    from vllm import SamplingParams
+
     """
     Build a vLLM SamplingParams from a config section (standard / analyze).
     """
@@ -382,7 +389,7 @@ def _make_sampling_params(
                 from vllm.sampling_params import StructuredOutputsParams
                 kwargs["structured_outputs"] = StructuredOutputsParams(grammar=grammar)
             except ImportError:
-                print("WARNING: Grammar constraints requested but not supported by this vLLM version. Ignoring grammar.")
+                log.info("WARNING: Grammar constraints requested but not supported by this vLLM version. Ignoring grammar.")
 
     return SamplingParams(**kwargs)
 
@@ -466,7 +473,7 @@ def prepare_analysis(
     try:
         ANALYSIS_TEXT = _format_analysis_prompt(CONFIG, data["system"], data["userTrail"])
         if DEBUG:
-            print("Prepared analysis text:", ANALYSIS_TEXT)
+            log.info("Prepared analysis text:", ANALYSIS_TEXT)
         on_done()
     except Exception as e:
         on_error(e)
@@ -523,16 +530,16 @@ def run_question(
     sampling = _make_sampling_params(CONFIG["analyze"], stop_tokens, grammar=data.get("grammar"))
 
     if DEBUG:
-        print("Generation config:", sampling)
-        print("Prompt:", prompt)
-        print("Using grammar:", data.get("grammar"))
+        log.info("Generation config:", sampling)
+        log.info("Prompt:", prompt)
+        log.info("Using grammar:", data.get("grammar"))
 
     max_paragraphs = int(data["maxParagraphs"])
     max_characters = int(data["maxCharacters"])
     if max_paragraphs:
-        print("Max paragraphs limit set to:", max_paragraphs)
+        log.info("Max paragraphs limit set to:", max_paragraphs)
     if max_characters:
-        print("Max characters limit set to:", max_characters)
+        log.info("Max characters limit set to:", max_characters)
 
     try:
         request_id = _next_request_id()
@@ -545,7 +552,7 @@ def run_question(
             step_outputs = MODEL.step()
 
             if (len(step_outputs) == 0):
-                print("No outputs from this step, but request is not finished. Continuing...")
+                log.info("No outputs from this step, but request is not finished. Continuing...")
                 continue
 
             found_its_step = False
@@ -553,7 +560,7 @@ def run_question(
 
             for output in step_outputs:
                 if (output.request_id != request_id):
-                    print("SKIPPED OUTPUT from other request:", output.request_id)
+                    log.info("SKIPPED OUTPUT from other request:", output.request_id)
                     continue  # Ignore outputs from other requests
 
                 found_its_step = True
@@ -579,7 +586,7 @@ def run_question(
                             if para_count >= max_paragraphs:
                                 part_before = delta.split('\n')[0]
                                 answer = answer[:len(answer) - len(delta)] + part_before
-                                print("\nAborting completion due to max paragraphs limit.")
+                                log.info("\nAborting completion due to max paragraphs limit.")
                                 MODEL.abort_request(request_id)
                                 stop_process = True
                                 break
@@ -588,7 +595,7 @@ def run_question(
                     if '\n' in delta:
                         part_before = delta.split('\n')[0]
                         answer = answer[:len(answer) - len(delta)] + part_before
-                        print("\nAborting completion due to max characters limit.")
+                        log.info("\nAborting completion due to max characters limit.")
                         MODEL.abort_request(request_id)
                         stop_process = True
                         break
@@ -597,7 +604,7 @@ def run_question(
                     should_stop = False
                     for stop_re in regex_stop_after:
                         if stop_re.search(answer):
-                            print(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
+                            log.info(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
                             MODEL.abort_request(request_id)
                             should_stop = True
                             break
@@ -608,13 +615,13 @@ def run_question(
                 if data.get("repetitionBuster"):
                     rep = pattern_repetition_checker(answer, 5, 300)
                     if rep and rep["amount"] >= 3:
-                        print(f"\nAborting completion due to repetition detected: {rep}")
+                        log.info(f"\nAborting completion due to repetition detected: {rep}")
                         MODEL.abort_request(request_id)
                         stop_process = True
                         break
 
                 if data.get("aggressiveListRepetitionBuster") and aggressive_list_repetition_checker(answer):
-                    print("\nAborting completion due to aggressive list repetition detected")
+                    log.info("\nAborting completion due to aggressive list repetition detected")
                     MODEL.abort_request(request_id)
                     stop_process = True
                     break
@@ -623,13 +630,10 @@ def run_question(
                 break  # No more outputs for this request, exit loop
 
         answer = _strip_trailing_newlines(answer)
-
-        print()
         
         on_answer(answer)
     except Exception as e:
-        print()
-        print(str(e))
+        log.error(str(e))
         on_error(e)
 
 
@@ -689,13 +693,13 @@ def generate_completion(
     max_paragraphs = int(data["maxParagraphs"])
     max_characters = int(data["maxCharacters"])
     if max_paragraphs:
-        print("Max paragraphs limit set to:", max_paragraphs)
+        log.info("Max paragraphs limit set to:", max_paragraphs)
     if max_characters:
-        print("Max characters limit set to:", max_characters)
+        log.info("Max characters limit set to:", max_characters)
 
     if DEBUG:
-        print("Generation config:", sampling)
-        print("Prompt:", prompt)
+        log.info("Generation config:", sampling)
+        log.info("Prompt:", prompt)
 
     regex_stop_after = [
         re.compile(rf"(^|[.,;])\s*{escape_regexp(s)}\s*([.,;]|$)", re.IGNORECASE)
@@ -718,7 +722,7 @@ def generate_completion(
             step_outputs = MODEL.step()
 
             if (len(step_outputs) == 0):
-                print("No outputs from this step, but request is not finished. Continuing...")
+                log.info("No outputs from this step, but request is not finished. Continuing...")
                 continue
 
             stop_process = False
@@ -758,7 +762,7 @@ def generate_completion(
                                 part_before = delta.split('\n')[0]
                                 if part_before:
                                     on_token(part_before)
-                                print("\nAborting completion due to max paragraphs limit.")
+                                log.info("\nAborting completion due to max paragraphs limit.")
                                 MODEL.abort_request(request_id)
                                 stop_process = True
                                 break
@@ -773,7 +777,7 @@ def generate_completion(
                         part_before = delta.split('\n')[0]
                         if part_before:
                             on_token(part_before)
-                        print("\nAborting completion due to max characters limit.")
+                        log.info("\nAborting completion due to max characters limit.")
                         MODEL.abort_request(request_id)
                         stop_process = True
                         break
@@ -785,7 +789,7 @@ def generate_completion(
                     should_stop = False
                     for stop_re in regex_stop_after:
                         if stop_re.search(accumulated_counting):
-                            print(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
+                            log.info(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
                             MODEL.abort_request(request_id)
                             should_stop = True
                             break
@@ -796,11 +800,9 @@ def generate_completion(
             if not found_its_step or stop_process:
                 break  # No more outputs for this request, exit loop
 
-        print()
         on_done()
     except Exception as e:
-        print()
-        print(str(e))
+        log.error(str(e))
         on_error(e)
 
 
@@ -808,8 +810,8 @@ def generate_completion(
 if __name__ == "__main__":
     argv = sys.argv[1:]
     if len(argv) < 1:
-        print("Please provide a config path as the first argument.", file=sys.stderr)
+        log.error("Please provide a config path as the first argument.", file=sys.stderr)
         sys.exit(1)
 
-    print("DEBUG mode:", DEBUG)
+    log.info("DEBUG mode:", DEBUG)
     load_config(argv[0])

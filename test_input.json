@@ -1,0 +1,8 @@
+{
+    "input": {
+        "action": "count-tokens",
+        "payload": {
+            "text": "Aha how many tokens in here"
+        }
+    }
+}
