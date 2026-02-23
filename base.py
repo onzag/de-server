@@ -55,8 +55,6 @@ import random
 from typing import Any, Callable, Optional
 from runpod import RunPodLogger
 
-from pre_download_model import download_model_from_url
-
 log = RunPodLogger()
 
 # ── Module-level state (mirrors the JS globals) ──────────────────────────
@@ -241,17 +239,8 @@ def load_config(config_path: str) -> None:
     check_config_validity(CONFIG["analyze"])
     log.info("Config loaded successfully")
 
-    if (CONFIG.get("modelUrl") is not None) and not isinstance(CONFIG["modelUrl"], str):
-        raise ValueError("Invalid config: modelUrl must be a string if provided")
-
-    model_url = CONFIG.get("modelUrl", None)
-    if not model_url:
-        if (CONFIG.get("modelPath") is None) or not isinstance(CONFIG["modelPath"], str):
-            raise ValueError("Invalid config: modelPath must be a string")
-    else:
-        # we don't allow modelPath or tokenizerPath when modelUrl is provided, to avoid confusion about where the model is coming from
-        if CONFIG.get("modelPath") is not None:
-            raise ValueError("Invalid config: modelPath should not be provided when modelUrl is used")
+    if CONFIG.get("modelPath") is None:
+        raise ValueError("Invalid config: modelPath should be set")
         
     if (CONFIG.get("tokenizerPath") is not None) and not isinstance(CONFIG["tokenizerPath"], str):
         raise ValueError("Invalid config: tokenizerPath must be a string if provided")
@@ -261,9 +250,6 @@ def load_config(config_path: str) -> None:
     
     if not isinstance(CONFIG.get("enforceEager"), bool):
         raise ValueError("Invalid config: enforceEager must be a boolean")
-    
-    if CONFIG.get("modelUrl") is not None:
-        CONFIG["modelPath"] = download_model_from_url(CONFIG["modelUrl"])
 
     if CONFIG.get("tokenizerPath") is not None:
         save_tokenizer(CONFIG["modelPath"], CONFIG["tokenizerPath"])
