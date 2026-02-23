@@ -8,31 +8,6 @@ from runpod import RunPodLogger
 
 CACHE_DIR = "/runpod-volume/huggingface-cache/hub"
 
-def find_model_path():
-    """
-    Find the path to a cached model.
-    
-    Args:
-        model_name: The model name from Hugging Face
-        (e.g., 'Qwen/Qwen2.5-0.5B-Instruct')
-    
-    Returns:
-        The full path to the cached model, or None if not found
-    """
-    # Convert model name format: "Org/Model" -> "models--Org--Model"
-    # cache_name = model_name.replace("/", "--")
-    # snapshots_dir = os.path.join(CACHE_DIR, f"models--{cache_name}", "snapshots")
-    
-    # Check if the model exists in cache
-    if os.path.exists(CACHE_DIR):
-        snapshots = os.listdir(CACHE_DIR)
-        return snapshots
-        # if snapshots:
-        #     # Return the path to the first (usually only) snapshot
-        #     return os.path.join(snapshots_dir, snapshots[0])
-    
-    return []
-
 # from base import load_config
 # import base
 
@@ -102,8 +77,13 @@ log = RunPodLogger()
 
 #         yield {"error": error_str, "rid": job_input.get('rid', 'no-rid')}
 
-def handler(job):    
-    yield {"type": "received", "aa": find_model_path()}
+def yieldEverythingInDir(directory):
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            yield {"path": os.path.join(root, file)}
+
+def handler(job):
+    yield from yieldEverythingInDir(CACHE_DIR)
 
 # Only run in main process to prevent re-initialization when vLLM spawns worker subprocesses
 if __name__ == "__main__" or multiprocessing.current_process().name == "MainProcess":
