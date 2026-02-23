@@ -125,7 +125,7 @@ if __name__ == "__main__" or multiprocessing.current_process().name == "MainProc
         {
             "handler": handler,
             # read from the environment variables, if not set, default to 5
-            "concurrency_modifier": int(os.getenv("CONCURRENCY_MODIFIER", "5")),
+            "concurrency_modifier": lambda x: int(os.getenv("CONCURRENCY_MODIFIER", "5")),
             "return_aggregate_stream": True,
         }
     )
