@@ -2,3 +2,5 @@
 /__pycache__
 /node_modules
 /models
+.runpod_jobs.pkl
+.runpod_jobs.pkl.lock

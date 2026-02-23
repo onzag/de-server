@@ -30,8 +30,36 @@ def handler(job):
                 "rid": job_input.get('rid', 'no-rid'),
                 "n_tokens": len(tokens)
             }
+
+        elif job_input.get("action") == "infer":
+            for result in base.generate_completion(job_input['payload']):
+                if 'error' in result:
+                    yield {"error": str(result['error']), "rid": job_input.get('rid', 'no-rid')}
+                elif 'token' in result:
+                    yield {"type": "token", "rid": job_input.get('rid', 'no-rid'), "text": result['token']}
+                elif 'done' in result and result['done']:
+                    yield {"type": "done", "rid": job_input.get('rid', 'no-rid')}
+                elif 'request_id' in result:
+                    pass
+
+        elif job_input.get("action") == "analyze-prepare":
+            for result in base.prepare_analysis(job_input['payload']):
+                if 'error' in result:
+                    yield {"error": str(result['error']), "rid": job_input.get('rid', 'no-rid')}
+                elif 'done' in result and result['done']:
+                    yield {"type": "analyze-ready", "rid": job_input.get('rid', 'no-rid')}
+
+        elif job_input.get("action") == "analyze-question":
+            for result in base.run_question(job_input['payload']):
+                if 'error' in result:
+                    yield {"error": str(result['error']), "rid": job_input.get('rid', 'no-rid')}
+                elif 'answer' in result:
+                    yield {"type": "answer", "rid": job_input.get('rid', 'no-rid'), "text": result['answer']}
+                elif 'request_id' in result:
+                    pass
+
         else:
-            yield {"error": "Unsupported action"}
+            yield {"error": "Unsupported action", "rid": job_input.get('rid', 'no-rid')}
 
     except Exception as e:
         error_str = str(e)
@@ -45,7 +73,7 @@ def handler(job):
             log.error("Terminating worker due to CUDA/GPU error")
             sys.exit(1)
 
-        yield {"error": error_str}
+        yield {"error": error_str, "rid": job_input.get('rid', 'no-rid')}
 
 # Only run in main process to prevent re-initialization when vLLM spawns worker subprocesses
 if __name__ == "__main__" or multiprocessing.current_process().name == "MainProcess":

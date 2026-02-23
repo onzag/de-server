@@ -1,8 +1,17 @@
 {
     "input": {
-        "action": "count-tokens",
+        "rid": "test_request_123",
+        "action": "infer",
         "payload": {
-            "text": "Aha how many tokens in here"
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Hello, how are you?"}
+            ],
+            "stopAt": [],
+            "maxCharacters": 0,
+            "maxParagraphs": 10,
+            "maxSafetyCharacters": 1000,
+            "stopAfter": []
         }
     }
 }

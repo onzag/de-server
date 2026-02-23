@@ -453,9 +453,7 @@ def _strip_trailing_newlines(text: str) -> str:
 
 def prepare_analysis(
     data: dict,
-    on_done: Callable[[], None],
-    on_error: Callable[[Exception], None],
-) -> None:
+):
     """
     Mirrors prepareAnalysis(). Caches the formatted analysis prompt text.
     """
@@ -474,17 +472,14 @@ def prepare_analysis(
         ANALYSIS_TEXT = _format_analysis_prompt(CONFIG, data["system"], data["userTrail"])
         if DEBUG:
             log.info("Prepared analysis text:", ANALYSIS_TEXT)
-        on_done()
+        yield {"done": True}
     except Exception as e:
-        on_error(e)
+        yield {"error": str(e)}
 
 
 def run_question(
     data: dict,
-    on_request_id: Callable[[str], None],
-    on_answer: Callable[[str], None],
-    on_error: Callable[[Exception], None],
-) -> None:
+):
     """
     Mirrors runQuestion(). Uses the analyze config section.
     Generates a full completion, then post-processes for paragraph/character
@@ -510,6 +505,8 @@ def run_question(
         raise ValueError("Invalid maxParagraphs format")
     if not isinstance(data.get("maxCharacters"), (int, float)) or data["maxCharacters"] < 0:
         raise ValueError("Invalid maxCharacters format")
+    if not isinstance(data.get("maxSafetyCharacters"), (int, float)) or data["maxSafetyCharacters"] < 0:
+        raise ValueError("Invalid maxSafetyCharacters format")
     if data.get("trail") is not None and not isinstance(data["trail"], str):
         raise ValueError("Invalid trail format")
     if data.get("grammar") is not None and not isinstance(data["grammar"], str):
@@ -536,14 +533,17 @@ def run_question(
 
     max_paragraphs = int(data["maxParagraphs"])
     max_characters = int(data["maxCharacters"])
+    max_safety_characters = int(data["maxSafetyCharacters"])
     if max_paragraphs:
         log.info("Max paragraphs limit set to:", max_paragraphs)
     if max_characters:
         log.info("Max characters limit set to:", max_characters)
+    if max_safety_characters:
+        log.info("Max safety characters limit set to:", max_safety_characters)
 
     try:
         request_id = _next_request_id()
-        on_request_id(request_id)
+        yield {"request_id": request_id}
         MODEL.add_request(request_id, prompt, sampling)
 
         answer = ""
@@ -552,7 +552,6 @@ def run_question(
             step_outputs = MODEL.step()
 
             if (len(step_outputs) == 0):
-                log.info("No outputs from this step, but request is not finished. Continuing...")
                 continue
 
             found_its_step = False
@@ -600,6 +599,12 @@ def run_question(
                         stop_process = True
                         break
 
+                if max_safety_characters > 0 and len(answer) >= max_safety_characters:
+                    log.info("\nAborting completion due to max safety characters limit.")
+                    MODEL.abort_request(request_id)
+                    stop_process = True
+                    break
+
                 if regex_stop_after:
                     should_stop = False
                     for stop_re in regex_stop_after:
@@ -631,19 +636,15 @@ def run_question(
 
         answer = _strip_trailing_newlines(answer)
         
-        on_answer(answer)
+        yield {"answer": answer, "done": True}
     except Exception as e:
         log.error(str(e))
-        on_error(e)
+        yield {"error": str(e)}
 
 
 def generate_completion(
     data: dict,
-    on_request_id: Callable[[str], None],
-    on_token: Callable[[str], None],
-    on_done: Callable[[], None],
-    on_error: Callable[[Exception], None],
-) -> None:
+):
     """
     Mirrors generateCompletion(). Uses the standard config section.
     Because vLLM returns the full generated text at once (not token-by-token
@@ -668,6 +669,8 @@ def generate_completion(
         raise ValueError("Invalid maxParagraphs format")
     if not isinstance(data.get("maxCharacters"), (int, float)) or data["maxCharacters"] < 0:
         raise ValueError("Invalid maxCharacters format")
+    if not isinstance(data.get("maxSafetyCharacters"), (int, float)) or data["maxSafetyCharacters"] < 0:
+        raise ValueError("Invalid maxSafetyCharacters format")
     if data.get("startCountingFromToken") is not None and not isinstance(data["startCountingFromToken"], str):
         raise ValueError("Invalid startCountingFromToken format")
     if data.get("trail") is not None and not isinstance(data["trail"], str):
@@ -692,10 +695,13 @@ def generate_completion(
 
     max_paragraphs = int(data["maxParagraphs"])
     max_characters = int(data["maxCharacters"])
+    max_safety_characters = int(data["maxSafetyCharacters"])
     if max_paragraphs:
         log.info("Max paragraphs limit set to:", max_paragraphs)
     if max_characters:
         log.info("Max characters limit set to:", max_characters)
+    if max_safety_characters:
+        log.info("Max safety characters limit set to:", max_safety_characters)
 
     if DEBUG:
         log.info("Generation config:", sampling)
@@ -710,7 +716,7 @@ def generate_completion(
 
     try:
         request_id = _next_request_id()
-        on_request_id(request_id)
+        yield {"request_id": request_id}
         MODEL.add_request(request_id, prompt, sampling)
 
         accumulated_text = ""
@@ -722,7 +728,6 @@ def generate_completion(
             step_outputs = MODEL.step()
 
             if (len(step_outputs) == 0):
-                log.info("No outputs from this step, but request is not finished. Continuing...")
                 continue
 
             stop_process = False
@@ -761,13 +766,13 @@ def generate_completion(
                             if para_count >= max_paragraphs:
                                 part_before = delta.split('\n')[0]
                                 if part_before:
-                                    on_token(part_before)
+                                    yield {"token": part_before}
                                 log.info("\nAborting completion due to max paragraphs limit.")
                                 MODEL.abort_request(request_id)
                                 stop_process = True
                                 break
                     else:
-                        on_token(delta)
+                        yield {"token": delta}
                         continue
                     break
 
@@ -776,13 +781,19 @@ def generate_completion(
                     if '\n' in delta:
                         part_before = delta.split('\n')[0]
                         if part_before:
-                            on_token(part_before)
+                            yield {"token": part_before}
                         log.info("\nAborting completion due to max characters limit.")
                         MODEL.abort_request(request_id)
                         stop_process = True
                         break
 
-                on_token(delta)
+                yield {"token": delta}
+
+                if max_safety_characters > 0 and len(accumulated_text) >= max_safety_characters:
+                    log.info("\nAborting completion due to max safety characters limit.")
+                    MODEL.abort_request(request_id)
+                    stop_process = True
+                    break
 
                 # ── Mid-stream stopAfter ──
                 if regex_stop_after and has_begun_counting:
@@ -800,10 +811,10 @@ def generate_completion(
             if not found_its_step or stop_process:
                 break  # No more outputs for this request, exit loop
 
-        on_done()
+        yield {"done": True}
     except Exception as e:
         log.error(str(e))
-        on_error(e)
+        yield {"error": str(e)}
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────
