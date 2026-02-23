@@ -16,11 +16,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --upgrade -r /requirements.txt
 
 # Install the Python dependencies
-RUN pip install --no-cache-dir -r /requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /requirements.txt
 
 # Copy your handler code
 COPY handler.py /handler.py
 COPY base.py /base.py
 
 # Command to run when the container starts
-CMD [ "python", "-u", "/handler.py" ]
+CMD [ "python3", "/handler.py" ]
