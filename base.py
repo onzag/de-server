@@ -68,6 +68,26 @@ CONFIG_PATH: str = ""
 ANALYSIS_TEXT: Optional[str] = None
 DEBUG: bool = os.environ.get("DEBUG", "") == "1"
 
+def get_num_gpus():
+    # Try reading environment variable first
+    num_gpus_env = os.environ.get("NUM_GPUS")
+    if num_gpus_env is not None:
+        try:
+            return int(num_gpus_env)
+        except ValueError:
+            pass
+
+    # Try PyTorch first
+    try:
+        import torch
+        count = torch.cuda.device_count()
+        if count > 0:
+            return count
+    except Exception:
+        pass
+
+    return 0
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -172,12 +192,17 @@ def load_model(model_path: str, tokenizer_path: str | None = None, enforce_eager
         MODEL = None
         MODEL_PATH = ""
 
+    num_gpus = get_num_gpus()
+
+    log.info(f"Detected {num_gpus} GPUs. Loading model with tensor_parallel_size={num_gpus}.")
+
     engine_kwargs: dict[str, Any] = dict(
         model=model_path,
         trust_remote_code=True,
         gpu_memory_utilization=0.90,
         dtype="auto",
         enforce_eager=enforce_eager,
+        tensor_parallel_size=num_gpus,
     )
 
     if tokenizer_path:
