@@ -203,6 +203,7 @@ def load_model(model_path: str, tokenizer_path: str | None = None, enforce_eager
         dtype="auto",
         enforce_eager=enforce_eager,
         tensor_parallel_size=num_gpus,
+        max_model_len=32768,
     )
 
     if tokenizer_path:
