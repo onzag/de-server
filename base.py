@@ -207,7 +207,7 @@ def save_tokenizer(model_path: str, tokenizer_path: str) -> None:
     tokenizer.save_pretrained(tokenizer_path)
     log.info(f"Tokenizer saved to: {tokenizer_path}")
 
-def load_config(config_path: str) -> None:
+def load_config(config_path: str, model_path_override: str | None = None) -> None:
     global CONFIG, CONFIG_PATH
 
     log.info(f"Loading config: {config_path}")
@@ -238,6 +238,10 @@ def load_config(config_path: str) -> None:
     check_config_validity(CONFIG["standard"])
     check_config_validity(CONFIG["analyze"])
     log.info("Config loaded successfully")
+
+    if model_path_override is not None:
+        log.info(f"Overriding modelPath in config with: {model_path_override}")
+        CONFIG["modelPath"] = model_path_override
 
     if CONFIG.get("modelPath") is None:
         raise ValueError("Invalid config: modelPath should be set")
