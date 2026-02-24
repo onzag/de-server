@@ -1,8 +1,8 @@
 from base import generate_completion, prepare_analysis, run_question, load_config
 import sys
+import asyncio
 
-
-def main():
+async def main():
     if len(sys.argv) < 2:
         print("Please provide a config path as the first argument.", file=sys.stderr)
         sys.exit(1)
@@ -24,7 +24,7 @@ def main():
         "trail": None
     })
 
-    for event in events:
+    async for event in events:
         if 'error' in event:
             print("Error during generation:", event['error'])
         elif 'request_id' in event:
@@ -37,7 +37,7 @@ def main():
         "userTrail": "<story>The story is about a young hero embarking on a quest.\n\nThe hero faces many challenges along the way.\n\nThe hero name is Arin.</story>"
     })
 
-    for event in events2:
+    async for event in events2:
         if 'error' in event:
             print("Error during generation:", event['error'])
 
@@ -52,7 +52,7 @@ def main():
         "grammar": 'root ::= "well I don\'t really know " [a-zA-Z0-9 _-]+ "."',
     })
 
-    for event in events3:
+    async for event in events3:
         if 'error' in event:
             print("Error during question answering:", event['error'])
         elif 'answer' in event:
@@ -69,7 +69,7 @@ def main():
         "grammar": None,
     })
 
-    for event in events4:
+    async for event in events4:
         if 'error' in event:
             print("Error during question answering:", event['error'])
         elif 'answer' in event:
@@ -86,7 +86,7 @@ def main():
         "grammar": None,
     })
 
-    for event in events5:
+    async for event in events5:
         if 'error' in event:
             print("Error during question answering:", event['error'])
         elif 'answer' in event:
@@ -94,4 +94,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

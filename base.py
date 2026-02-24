@@ -54,6 +54,7 @@ import sys
 import random
 from typing import Any, Callable, Optional
 from runpod import RunPodLogger
+#from vllm.engine.async_llm_engine import AsyncLLM
 
 log = RunPodLogger()
 
@@ -157,7 +158,7 @@ def _next_request_id() -> str:
 
 
 def load_model(model_path: str, tokenizer_path: str | None = None, enforce_eager: bool = True) -> None:
-    from vllm import EngineArgs, LLMEngine
+    from vllm import AsyncEngineArgs, AsyncLLMEngine
 
     global MODEL, MODEL_PATH
 
@@ -183,8 +184,9 @@ def load_model(model_path: str, tokenizer_path: str | None = None, enforce_eager
         log.info(f"Using pre-saved tokenizer: {tokenizer_path}")
         engine_kwargs["tokenizer"] = tokenizer_path
 
-    engine_args = EngineArgs(**engine_kwargs)
-    MODEL = LLMEngine.from_engine_args(engine_args)
+    engine_args = AsyncEngineArgs(**engine_kwargs)
+    engine = AsyncLLMEngine.from_engine_args(engine_args)
+    MODEL = engine
     MODEL_PATH = model_path
     log.info("Model loaded successfully")
 
@@ -399,7 +401,7 @@ def _strip_trailing_newlines(text: str) -> str:
 
 # ── Public API (mirrors JS exports) ──────────────────────────────────────
 
-def prepare_analysis(
+async def prepare_analysis(
     data: dict,
 ):
     """
@@ -425,7 +427,7 @@ def prepare_analysis(
         yield {"error": str(e)}
 
 
-def run_question(
+async def run_question(
     data: dict,
 ):
     """
@@ -475,112 +477,90 @@ def run_question(
     sampling = _make_sampling_params(CONFIG["analyze"], stop_tokens, grammar=data.get("grammar"))
 
     if DEBUG:
-        log.info("Generation config:", sampling)
-        log.info("Prompt:", prompt)
-        log.info("Using grammar:", data.get("grammar"))
+        log.info("Generation config: " + str(sampling))
+        log.info("Prompt: " + str(prompt))
+        log.info("Using grammar: " + str(data.get("grammar")))
 
     max_paragraphs = int(data["maxParagraphs"])
     max_characters = int(data["maxCharacters"])
     max_safety_characters = int(data["maxSafetyCharacters"])
     if max_paragraphs:
-        log.info("Max paragraphs limit set to:", max_paragraphs)
+        log.info("Max paragraphs limit set to: " + str(max_paragraphs))
     if max_characters:
-        log.info("Max characters limit set to:", max_characters)
+        log.info("Max characters limit set to: " + str(max_characters))
     if max_safety_characters:
-        log.info("Max safety characters limit set to:", max_safety_characters)
+        log.info("Max safety characters limit set to: " + str(max_safety_characters))
 
     try:
         request_id = _next_request_id()
         yield {"request_id": request_id}
-        MODEL.add_request(request_id, prompt, sampling)
+        generation = MODEL.generate(prompt, sampling_params=sampling, request_id=request_id)
 
         answer = ""
         prev_len = 0
-        while MODEL.has_unfinished_requests():
-            step_outputs = MODEL.step()
 
-            if (len(step_outputs) == 0):
+        async for output in generation:
+            if (output.request_id != request_id):
+                log.info("SKIPPED OUTPUT from other request: " + str(output.request_id))
+                continue  # Ignore outputs from other requests
+
+            new_text = output.outputs[0].text
+            delta = new_text[prev_len:]
+            prev_len = len(new_text)
+
+            if not delta:
                 continue
 
-            found_its_step = False
-            stop_process = False
+            if DEBUG:
+                sys.stdout.write(delta + "\u00a7")
+                sys.stdout.flush()
 
-            for output in step_outputs:
-                if (output.request_id != request_id):
-                    log.info("SKIPPED OUTPUT from other request:", output.request_id)
-                    continue  # Ignore outputs from other requests
+            answer += delta
 
-                found_its_step = True
-                new_text = output.outputs[0].text
-                delta = new_text[prev_len:]
-                prev_len = len(new_text)
-
-                if not delta:
-                    continue
-
-                if DEBUG:
-                    sys.stdout.write(delta + "\u00a7")
-                    sys.stdout.flush()
-
-                answer += delta
-
-                # ── Mid-stream checks (mirrors JS onTextChunk) ──
-                if max_paragraphs > 0:
-                    para_count = 0
-                    for i in range(len(answer) - 1):
-                        if answer[i] == '\n' and answer[i + 1] == '\n':
-                            para_count += 1
-                            if para_count >= max_paragraphs:
-                                part_before = delta.split('\n')[0]
-                                answer = answer[:len(answer) - len(delta)] + part_before
-                                log.info("\nAborting completion due to max paragraphs limit.")
-                                MODEL.abort_request(request_id)
-                                stop_process = True
-                                break
-
-                if max_characters > 0 and len(answer) >= max_characters:
-                    if '\n' in delta:
-                        part_before = delta.split('\n')[0]
-                        answer = answer[:len(answer) - len(delta)] + part_before
-                        log.info("\nAborting completion due to max characters limit.")
-                        MODEL.abort_request(request_id)
-                        stop_process = True
-                        break
-
-                if max_safety_characters > 0 and len(answer) >= max_safety_characters:
-                    log.info("\nAborting completion due to max safety characters limit.")
-                    MODEL.abort_request(request_id)
-                    stop_process = True
-                    break
-
-                if regex_stop_after:
-                    should_stop = False
-                    for stop_re in regex_stop_after:
-                        if stop_re.search(answer):
-                            log.info(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
-                            MODEL.abort_request(request_id)
-                            should_stop = True
+            # ── Mid-stream checks (mirrors JS onTextChunk) ──
+            if max_paragraphs > 0:
+                para_count = 0
+                for i in range(len(answer) - 1):
+                    if answer[i] == '\n' and answer[i + 1] == '\n':
+                        para_count += 1
+                        if para_count >= max_paragraphs:
+                            part_before = delta.split('\n')[0]
+                            answer = answer[:len(answer) - len(delta)] + part_before
+                            log.info("\nAborting completion due to max paragraphs limit " + str(max_paragraphs) + ".")
+                            await MODEL.abort(request_id)
                             break
-                    if should_stop:
-                        stop_process = True
-                        break
 
-                if data.get("repetitionBuster"):
-                    rep = pattern_repetition_checker(answer, 5, 300)
-                    if rep and rep["amount"] >= 3:
-                        log.info(f"\nAborting completion due to repetition detected: {rep}")
-                        MODEL.abort_request(request_id)
-                        stop_process = True
-                        break
-
-                if data.get("aggressiveListRepetitionBuster") and aggressive_list_repetition_checker(answer):
-                    log.info("\nAborting completion due to aggressive list repetition detected")
-                    MODEL.abort_request(request_id)
-                    stop_process = True
+            if max_characters > 0 and len(answer) >= max_characters:
+                if '\n' in delta:
+                    part_before = delta.split('\n')[0]
+                    answer = answer[:len(answer) - len(delta)] + part_before
+                    log.info("\nAborting completion due to max characters limit " + str(max_characters) + ".")
+                    await MODEL.abort(request_id)
                     break
 
-            if not found_its_step or stop_process:
-                break  # No more outputs for this request, exit loop
+            if max_safety_characters > 0 and len(answer) >= max_safety_characters:
+                log.info("\nAborting completion due to max safety characters limit " + str(max_safety_characters) + ".")
+                await MODEL.abort(request_id)
+                break
+
+            if regex_stop_after:
+                for stop_re in regex_stop_after:
+                    if stop_re.search(answer):
+                        log.info(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
+                        await MODEL.abort(request_id)
+                        break
+
+            if data.get("repetitionBuster"):
+                rep = pattern_repetition_checker(answer, 5, 300)
+                if rep and rep["amount"] >= 3:
+                    log.info(f"\nAborting completion due to repetition detected: {rep}")
+                    await MODEL.abort(request_id)
+                    break
+
+            if data.get("aggressiveListRepetitionBuster") and aggressive_list_repetition_checker(answer):
+                log.info("\nAborting completion due to aggressive list repetition detected")
+                await MODEL.abort(request_id)
+                break
 
         answer = _strip_trailing_newlines(answer)
         
@@ -590,7 +570,7 @@ def run_question(
         yield {"error": str(e)}
 
 
-def generate_completion(
+async def generate_completion(
     data: dict,
 ):
     """
@@ -645,15 +625,15 @@ def generate_completion(
     max_characters = int(data["maxCharacters"])
     max_safety_characters = int(data["maxSafetyCharacters"])
     if max_paragraphs:
-        log.info("Max paragraphs limit set to:", max_paragraphs)
+        log.info("Max paragraphs limit set to: " + str(max_paragraphs))
     if max_characters:
-        log.info("Max characters limit set to:", max_characters)
+        log.info("Max characters limit set to: " + str(max_characters))
     if max_safety_characters:
-        log.info("Max safety characters limit set to:", max_safety_characters)
+        log.info("Max safety characters limit set to: " + str(max_safety_characters))
 
     if DEBUG:
-        log.info("Generation config:", sampling)
-        log.info("Prompt:", prompt)
+        log.info("Generation config: " + str(sampling))
+        log.info("Prompt: " + str(prompt))
 
     regex_stop_after = [
         re.compile(rf"(^|[.,;])\s*{escape_regexp(s)}\s*([.,;]|$)", re.IGNORECASE)
@@ -665,99 +645,74 @@ def generate_completion(
     try:
         request_id = _next_request_id()
         yield {"request_id": request_id}
-        MODEL.add_request(request_id, prompt, sampling)
+        generation = MODEL.generate(prompt, sampling_params=sampling, request_id=request_id)
 
         accumulated_text = ""
         accumulated_counting = ""
         has_begun_counting = start_counting_from is None
         prev_len = 0
 
-        while MODEL.has_unfinished_requests():
-            step_outputs = MODEL.step()
+        async for output in generation:
+            if (output.request_id != request_id):
+                continue  # Ignore outputs from other requests
 
-            if (len(step_outputs) == 0):
+            new_text = output.outputs[0].text
+            delta = new_text[prev_len:]
+            prev_len = len(new_text)
+
+            if not delta:
                 continue
 
-            stop_process = False
-            found_its_step = False
+            accumulated_text += delta
 
-            for output in step_outputs:
-                if (output.request_id != request_id):
-                    continue  # Ignore outputs from other requests
+            if DEBUG:
+                sys.stdout.write(delta + "\u00a7")
+                sys.stdout.flush()
 
-                found_its_step = True
-                new_text = output.outputs[0].text
-                delta = new_text[prev_len:]
-                prev_len = len(new_text)
+            if not has_begun_counting and start_counting_from and start_counting_from in accumulated_text:
+                has_begun_counting = True
 
-                if not delta:
-                    continue
-
-                accumulated_text += delta
-
-                if DEBUG:
-                    sys.stdout.write(delta + "\u00a7")
-                    sys.stdout.flush()
-
-                if not has_begun_counting and start_counting_from and start_counting_from in accumulated_text:
-                    has_begun_counting = True
-
-                if has_begun_counting:
-                    accumulated_counting += delta
+            if has_begun_counting:
+                accumulated_counting += delta
 
                 # ── Mid-stream paragraph limit ──
-                if max_paragraphs > 0 and has_begun_counting:
-                    para_count = 0
-                    for i in range(len(accumulated_counting) - 1):
-                        if accumulated_counting[i] == '\n' and accumulated_counting[i + 1] == '\n':
-                            para_count += 1
-                            if para_count >= max_paragraphs:
-                                part_before = delta.split('\n')[0]
-                                if part_before:
-                                    yield {"token": part_before}
-                                log.info("\nAborting completion due to max paragraphs limit.")
-                                MODEL.abort_request(request_id)
-                                stop_process = True
-                                break
-                    else:
-                        yield {"token": delta}
-                        continue
-                    break
-
-                # ── Mid-stream character limit ──
-                if max_characters > 0 and len(accumulated_text) >= max_characters:
-                    if '\n' in delta:
-                        part_before = delta.split('\n')[0]
-                        if part_before:
-                            yield {"token": part_before}
-                        log.info("\nAborting completion due to max characters limit.")
-                        MODEL.abort_request(request_id)
-                        stop_process = True
-                        break
-
-                yield {"token": delta}
-
-                if max_safety_characters > 0 and len(accumulated_text) >= max_safety_characters:
-                    log.info("\nAborting completion due to max safety characters limit.")
-                    MODEL.abort_request(request_id)
-                    stop_process = True
-                    break
-
-                # ── Mid-stream stopAfter ──
-                if regex_stop_after and has_begun_counting:
-                    should_stop = False
-                    for stop_re in regex_stop_after:
-                        if stop_re.search(accumulated_counting):
-                            log.info(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
-                            MODEL.abort_request(request_id)
-                            should_stop = True
+            if max_paragraphs > 0 and has_begun_counting:
+                para_count = 0
+                for i in range(len(accumulated_counting) - 1):
+                    if accumulated_counting[i] == '\n' and accumulated_counting[i + 1] == '\n':
+                        para_count += 1
+                        if para_count >= max_paragraphs:
+                            part_before = delta.split('\n')[0]
+                            if part_before:
+                                yield {"token": part_before}
+                            log.info("\nAborting completion due to max paragraphs limit.")
+                            await MODEL.abort(request_id)
                             break
-                    if should_stop:
-                        stop_process = True
-                        break
 
-            if not found_its_step or stop_process:
-                break  # No more outputs for this request, exit loop
+            # ── Mid-stream character limit ──
+            if max_characters > 0 and len(accumulated_text) >= max_characters:
+                if '\n' in delta:
+                    part_before = delta.split('\n')[0]
+                    if part_before:
+                        yield {"token": part_before}
+                    log.info("\nAborting completion due to max characters limit.")
+                    await MODEL.abort(request_id)
+                    break
+
+            yield {"token": delta}
+
+            if max_safety_characters > 0 and len(accumulated_text) >= max_safety_characters:
+                log.info("\nAborting completion due to max safety characters limit.")
+                await MODEL.abort(request_id)
+                break
+
+            # ── Mid-stream stopAfter ──
+            if regex_stop_after and has_begun_counting:
+                for stop_re in regex_stop_after:
+                    if stop_re.search(accumulated_counting):
+                        log.info(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
+                        await MODEL.abort(request_id)
+                        break
 
         yield {"done": True}
     except Exception as e:

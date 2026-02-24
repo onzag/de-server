@@ -55,7 +55,7 @@ def find_model_path():
 
 log = RunPodLogger()
 
-def handler(job):
+async def handler(job):
     """
     This is a simple handler that takes a name as input and returns a greeting.
     The job parameter contains the input data in job["input"]
@@ -76,7 +76,7 @@ def handler(job):
             }
 
         elif job_input.get("action") == "infer":
-            for result in base.generate_completion(job_input['payload']):
+            async for result in base.generate_completion(job_input['payload']):
                 if 'error' in result:
                     yield {"error": str(result['error']), "rid": job_input.get('rid', 'no-rid')}
                 elif 'token' in result:
@@ -87,14 +87,14 @@ def handler(job):
                     pass
 
         elif job_input.get("action") == "analyze-prepare":
-            for result in base.prepare_analysis(job_input['payload']):
+            async for result in base.prepare_analysis(job_input['payload']):
                 if 'error' in result:
                     yield {"error": str(result['error']), "rid": job_input.get('rid', 'no-rid')}
                 elif 'done' in result and result['done']:
                     yield {"type": "analyze-ready", "rid": job_input.get('rid', 'no-rid')}
 
         elif job_input.get("action") == "analyze-question":
-            for result in base.run_question(job_input['payload']):
+            async for result in base.run_question(job_input['payload']):
                 if 'error' in result:
                     yield {"error": str(result['error']), "rid": job_input.get('rid', 'no-rid')}
                 elif 'answer' in result:
