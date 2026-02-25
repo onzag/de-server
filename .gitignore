@@ -5,3 +5,5 @@
 .runpod_jobs.pkl
 .runpod_jobs.pkl.lock
 secret
+cert.pem
+key.pem

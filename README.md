@@ -24,7 +24,3 @@ If you get a warning message about missing the tokenizer because of using a gguf
 config `tokenizerPath` that should speed thigns up
 
 vllm expect `enforceEager` to be specified, keep it at false for faster inference, true for faster cold starts.
-
-## runpod-serverless.py
-
-Made to be run with runpod.

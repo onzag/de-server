@@ -12,6 +12,7 @@
 import asyncio
 import json
 import secrets
+import ssl
 import sys
 import websockets
 import base
@@ -122,9 +123,17 @@ async def handle_client(websocket):
             base.MODEL.abort_request(internalrid)  # Stop the requests if the client disconnects
 
 async def main():
-    async with websockets.serve(handle_client, HOST, PORT, process_request=process_request):
-        print(f"WebSocket server started on ws://{HOST}:{PORT}")
-        await asyncio.Future()  # run forever
+    ssl_context = None
+    try:
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
+        print("SSL context created with cert.pem and key.pem")
+    except Exception as e:
+        print(f"Failed to create SSL context: {e}")
+        sys.exit(1)
+        
+    server = await websockets.serve(handle_client, HOST, PORT, process_request=process_request, ssl=ssl_context)
+    await server.serve_forever()
 
 async def process_request(connection, request):
     parsed = urlparse(request.path)
