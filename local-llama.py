@@ -11,9 +11,11 @@
 
 import asyncio
 import json
+import secrets
 import sys
 import websockets
 import base
+from urllib.parse import urlparse, parse_qs
 
 PORT = 8765
 HOST = '0.0.0.0'
@@ -23,8 +25,6 @@ async def handle_client(websocket):
 
     await websocket.send(json.dumps({"type": "ready", "message": "Model is ready", "context_window_size": base.CONTEXT_WINDOW_SIZE, "supports_parallel_requests": True}))
 
-    websocket
-
     loop = asyncio.get_event_loop()
     executor = None  # Use default executor (main thread)
     try:
@@ -33,76 +33,67 @@ async def handle_client(websocket):
             try:
                 data = json.loads(message)
                 rid = data.get('rid', 'no-rid')  # Use provided rid or default to 'no-rid'
-                internalid = None  # To track the internal request ID for this action, if applicable
+                internal_request_id = None  # To track the internal request ID for this action, if applicable
+
+                if (base.DEBUG):
+                    print(f"Received message from client: {data}")
+
+                payload = data['payload'] if 'payload' in data else None
+
                 # Handle different actions
                 if data.get('action') == 'infer':
-                    if not data.get('payload'):
+                    if not payload:
                         raise ValueError("Invalid payload for infer")
                     
-                    def run_generator(payload):
-                        for result in base.generate_completion(payload):
-                            if 'error' in result:
-                                loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(result['error'])})))
-                                nonlocal internalid
-                                if internalid is not None:
-                                    requestid_to_rid.pop(internalid, None)  # Remove from active requests on error
-                            elif 'token' in result:
-                                loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "token", "rid": rid, "text": result['token']})))
-                            elif 'done' in result and result['done']:
-                                loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "done", "rid": rid})))
-                                nonlocal internalid
-                                if internalid is not None:
-                                    requestid_to_rid.pop(internalid, None)  # Remove from active requests on done
-                            elif 'request_id' in result:
-                                nonlocal internalid
-                                internalid = result['request_id']
-                                requestid_to_rid[internalid] = rid  # Track active request ID
-                    await loop.run_in_executor(executor, run_generator, data['payload'])
+                    async for result in base.generate_completion(payload):
+                        if 'error' in result:
+                            loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(result['error'])})))
+                            if internal_request_id is not None:
+                                requestid_to_rid.pop(internal_request_id, None)  # Remove from active requests on error
+                        elif 'token' in result:
+                            loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "token", "rid": rid, "text": result['token']})))
+                        elif 'done' in result and result['done']:
+                            loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "done", "rid": rid})))
+                            if internal_request_id is not None:
+                                requestid_to_rid.pop(internal_request_id, None)  # Remove from active requests on done
+                        elif 'request_id' in result:
+                            internal_request_id = result['request_id']
+                            requestid_to_rid[internal_request_id] = rid  # Track active request ID
                 elif data.get('action') == 'analyze-prepare':
-                    if not data.get('payload'):
+                    if not payload:
                         raise ValueError("Invalid payload for analyze-prepare")
-                    
-                    def run_generator(payload):
-                        for result in base.prepare_analysis(payload):
-                            if 'error' in result:
-                                loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(result['error'])})))
-                                nonlocal internalid
-                                if internalid is not None:
-                                    requestid_to_rid.pop(internalid, None)  # Remove from active requests on error
-                            elif 'done' in result and result['done']:
-                                loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "analyze-ready", "rid": rid})))
-                                nonlocal internalid
-                                if internalid is not None:
-                                    requestid_to_rid.pop(internalid, None)  # Remove from active requests on done
 
-                    await loop.run_in_executor(executor, run_generator, data['payload'])
+                    async for result in base.prepare_analysis(payload):
+                        if 'error' in result:
+                            loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(result['error'])})))
+                            if internal_request_id is not None:
+                                requestid_to_rid.pop(internal_request_id, None)  # Remove from active requests on error
+                        elif 'done' in result and result['done']:
+                            loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "analyze-ready", "rid": rid})))
+                            if internal_request_id is not None:
+                                requestid_to_rid.pop(internal_request_id, None)  # Remove from active requests on done
+                    
                 elif data.get('action') == 'analyze-question':
-                    if not data.get('payload'):
+                    if not payload:
                         raise ValueError("Invalid payload for analyze-question")
                     
-                    def run_generator(payload):
-                        for result in base.run_question(payload):
-                            if 'error' in result:
-                                loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(result['error'])})))
-                                nonlocal internalid
-                                if internalid is not None:
-                                    requestid_to_rid.pop(internalid, None)  # Remove from active requests on error
-                            elif 'answer' in result:
-                                loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "answer", "rid": rid, "text": result['answer']})))
-                                if result.get('done'):
-                                    nonlocal internalid
-                                    if internalid is not None:
-                                        requestid_to_rid.pop(internalid, None)  # Remove from active requests on done
-                            elif 'request_id' in result:
-                                nonlocal internalid
-                                internalid = result['request_id']
-                                requestid_to_rid[internalid] = rid  # Track active request ID
-
-                    await loop.run_in_executor(executor, run_generator, data['payload'])
+                    async for result in base.run_question(payload):
+                        if 'error' in result:
+                            loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(result['error'])})))
+                            if internal_request_id is not None:
+                                requestid_to_rid.pop(internal_request_id, None)  # Remove from active requests on error
+                        elif 'answer' in result:
+                            loop.call_soon_threadsafe(asyncio.create_task, websocket.send(json.dumps({"type": "answer", "rid": rid, "text": result['answer']})))
+                            if result.get('done'):
+                                if internal_request_id is not None:
+                                    requestid_to_rid.pop(internal_request_id, None)  # Remove from active requests on done
+                        elif 'request_id' in result:
+                            internal_request_id = result['request_id']
+                            requestid_to_rid[internal_request_id] = rid  # Track active request ID
                 elif data.get('action') == 'count-tokens':
-                    if not data.get('payload') or not isinstance(data['payload'].get('text'), str):
+                    if not payload or not isinstance(payload.get('text'), str):
                         raise ValueError("Invalid payload for count-tokens")
-                    text = data['payload']['text']
+                    text = payload['text']
                     tokens = base.MODEL.tokenizer.encode(text)
                     await websocket.send(json.dumps({"type": "count", "rid": rid, "n_tokens": len(tokens)}))
                 elif data.get('action') == 'cancel':
@@ -113,14 +104,15 @@ async def handle_client(websocket):
                     if (cancel_rid == 'no-rid'):
                         await websocket.send(json.dumps({"type": "error", "rid": rid, "message": "Cannot cancel request without a valid rid"}))
                         continue
-                    internalid = None
+
                     for key, value in requestid_to_rid.items():
                         if value == cancel_rid:
-                            internalid = key
+                            internal_request_id = key
                             break
-                    if internalid is not None:
-                        base.MODEL.abort_request(internalid)
-                        requestid_to_rid.pop(internalid, None)  # Remove from active requests
+
+                    if internal_request_id is not None:
+                        base.MODEL.abort_request(internal_request_id)
+                        requestid_to_rid.pop(internal_request_id, None)  # Remove from active requests
             except Exception as e:
                 print(str(e))
                 await websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(e)}))
@@ -134,22 +126,24 @@ async def main():
         print(f"WebSocket server started on ws://{HOST}:{PORT}")
         await asyncio.Future()  # run forever
 
-async def process_request(path, request_headers):
-    api_key = request_headers.get("secret")
+async def process_request(connection, request):
+    parsed = urlparse(request.path)
+    query_params = parse_qs(parsed.query)
+    secret = query_params.get('secret', [None])[0]
 
     # read the local ./secret file for the expected API key
     try:
         with open("./secret", "r") as f:
-            expected_api_key = f.read().strip()
+            expected_secret = f.read().strip()
     except Exception as e:
         # create a new random API secret and save it to the file
         import secrets
-        expected_api_key = secrets.token_hex(512)
+        expected_secret = secrets.token_hex(64)
         with open("./secret", "w") as f:
-            f.write(expected_api_key)
-        print(f"Generated new Secret key and saved to ./secret: {expected_api_key}")
+            f.write(expected_secret)
+        print(f"Generated new Secret key and saved to ./secret: {expected_secret}")
 
-    if api_key != expected_api_key:
+    if secret != expected_secret:
         print(f"Unauthorized connection attempt with invalid secret")
         return (401, [], b'Unauthorized')  # Return 401 Unauthorized if the secret key is incorrect
 
@@ -161,6 +155,17 @@ if __name__ == "__main__":
     if len(argv) < 1:
         print("Please provide a config path as the first argument.", file=sys.stderr)
         sys.exit(1)
+
+    try:
+        with open("./secret", "r") as f:
+            print("Using Secret key from ./secret for authentication:")
+    except Exception as e:
+        print("No existing secret key found. A new one will be generated and saved to ./secret.")
+        
+        expected_secret = secrets.token_hex(64)
+        with open("./secret", "w") as f:
+            f.write(expected_secret)
+        print(f"Generated new Secret key and saved to ./secret: {expected_secret}")
 
     print("DEBUG mode:", base.DEBUG)
     base.load_config(argv[0])
