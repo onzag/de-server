@@ -81,4 +81,32 @@ for file in files_info:
         except subprocess.CalledProcessError as e:
             print(f"Error downloading {file['path']}:", e)
 
+default_json = {
+    "modelPath": "./models/" + model_name,
+    "enforceEager": False,
+    "mode": "mistral",
+    "standard": {
+        "temperature": 1.0,
+        "dynamicTemperature": [0.8, 1.05],
+        "minP": 0.025,
+        "dry": {
+            "multiplier": 0.8,
+            "base": 1.74,
+            "length": 5
+        },
+        "maxTokens": 1024
+    },
+    "analyze": {
+        "temperature": 0.4,
+        "topP": 0.8,
+        "maxTokens": 512
+    }
+}
+
+config_path = "./models/" + model_name.replace("/", "_") + ".json"
+if not os.path.exists(config_path):
+    print("Creating default model loading json file at", config_path)
+    with open(config_path, "w") as f:
+        json.dump(default_json, f, indent=4)
+
 print("Model download complete")
