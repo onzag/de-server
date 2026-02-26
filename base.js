@@ -430,10 +430,10 @@ export async function runQuestion(data, onAnswer, onError) {
         if (CONFIG.analyze.temperatureRange) {
             basicConfig.temperature = getDynamicTemperature(CONFIG.analyze.temperatureRange[0], CONFIG.analyze.temperatureRange[1]);
         }
-        if (typeof data.maxParagraphs === "number") {
+        if (typeof data.maxParagraphs === "number" && DEBUG) {
             console.log("Max paragraphs limit set to:", data.maxParagraphs);
         }
-        if (typeof data.maxCharacters === "number") {
+        if (typeof data.maxCharacters === "number" && DEBUG) {
             console.log("Max characters limit set to:", data.maxCharacters);
         }
         // TODO add XTC and dry sampling options from config
@@ -682,10 +682,10 @@ export async function generateCompletion(data, onToken, onDone, onError) {
             basicConfig.temperature = getDynamicTemperature(CONFIG.standard.temperatureRange[0], CONFIG.standard.temperatureRange[1]);
         }
         // TODO add XTC and dry sampling options from config
-        if (typeof data.maxParagraphs === "number") {
+        if (typeof data.maxParagraphs === "number" && DEBUG) {
             console.log("Max paragraphs limit set to:", data.maxParagraphs);
         }
-        if (typeof data.maxCharacters === "number") {
+        if (typeof data.maxCharacters === "number" && DEBUG) {
             console.log("Max characters limit set to:", data.maxCharacters);
         }
 

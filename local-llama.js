@@ -7,6 +7,8 @@
 import { WebSocketServer } from "ws";
 import { CONTROLLER, MODEL, generateCompletion, prepareAnalysis, runQuestion } from "./base.js";
 
+console.log("Starting Local LLaMA WebSocket Server, listening on ws://0.0.0.0:8765");
+
 const wss = new WebSocketServer({ port: 8765, host: '0.0.0.0' });
 
 let CONTEXT_WINDOW_SIZE = 2048 * 4; // 8k context
