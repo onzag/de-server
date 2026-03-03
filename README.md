@@ -24,3 +24,13 @@ If you get a warning message about missing the tokenizer because of using a gguf
 config `tokenizerPath` that should speed thigns up
 
 vllm expect `enforceEager` to be specified, keep it at false for faster inference, true for faster cold starts.
+
+## Deployment style servers
+
+The python version is recommended when using online services as it uses vllm and it is better optimized on inference jobs.
+
+Some example scripts that will setup an environment are available for use, call them as:
+
+`bash ./scripts/[script-name].sh`
+
+Check the content of the script as it depends on hardware.
