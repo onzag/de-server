@@ -6,4 +6,3 @@
 
 bash install-python-deps.sh
 bash download-model.sh Firworks/Behemoth-X-123B-v2.1-nvfp4
-bash enter-pyenv.sh

@@ -117,8 +117,12 @@ async def handle_client(websocket):
             except Exception as e:
                 print(str(e))
                 await websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(e)}))
-    except websockets.ConnectionClosed:
-        print('Client disconnected')
+    except websockets.ConnectionClosedOK:
+        print('Client disconnected normally')
+        for internalrid in requestid_to_rid.keys():
+            base.MODEL.abort_request(internalrid)  # Stop the requests if the client disconnects
+    except websockets.ConnectionClosedError as e:
+        print(f'Client disconnected abnormally: code={e.code} reason={e.reason}')
         for internalrid in requestid_to_rid.keys():
             base.MODEL.abort_request(internalrid)  # Stop the requests if the client disconnects
 

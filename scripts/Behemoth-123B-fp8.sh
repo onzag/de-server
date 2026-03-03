@@ -6,4 +6,3 @@
 
 bash install-python-deps.sh
 bash download-model.sh sh0ck0r/Behemoth-X-123B-v2.1-FP8-Dynamic
-bash enter-pyenv.sh
