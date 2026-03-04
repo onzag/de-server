@@ -5,4 +5,4 @@
 # Will not run on a H100 GPU nor a RTX 6000 Blackwell, as the model is too large for the H100 and the FP8 format is not natively supported on the RTX 6000 Blackwell
 
 bash install-python-deps.sh
-bash download-model.sh sh0ck0r/Behemoth-X-123B-v2.1-FP8-Dynamic
+./pyenv/bin/python download-model.py sh0ck0r/Behemoth-X-123B-v2.1-FP8-Dynamic
