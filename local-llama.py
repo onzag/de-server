@@ -17,9 +17,13 @@ import sys
 import websockets
 import base
 from urllib.parse import urlparse, parse_qs
+import os
 
 PORT = 8765
 HOST = '0.0.0.0'
+
+# get the DEV=1 environment variable to make a simpler secret for development
+DEV = os.getenv("DEV", "0") == "1"
 
 async def handle_client(websocket):
     print('Client connected')
@@ -144,17 +148,20 @@ async def process_request(connection, request):
     query_params = parse_qs(parsed.query)
     secret = query_params.get('secret', [None])[0]
 
-    # read the local ./secret file for the expected API key
-    try:
-        with open("./secret", "r") as f:
-            expected_secret = f.read().strip()
-    except Exception as e:
-        # create a new random API secret and save it to the file
-        import secrets
-        expected_secret = secrets.token_hex(64)
-        with open("./secret", "w") as f:
-            f.write(expected_secret)
-        print(f"Generated new Secret key and saved to ./secret: {expected_secret}")
+    if not DEV:
+        # read the local ./secret file for the expected API key
+        try:
+            with open("./secret", "r") as f:
+                expected_secret = f.read().strip()
+        except Exception as e:
+            # create a new random API secret and save it to the file
+            import secrets
+            expected_secret = secrets.token_hex(64)
+            with open("./secret", "w") as f:
+                f.write(expected_secret)
+            print(f"Generated new Secret key and saved to ./secret: {expected_secret}")
+    else:
+        expected_secret = "dev-secret-12345678900abcdef"  # Simple secret for development mode
 
     if secret != expected_secret:
         print(f"Unauthorized connection attempt with invalid secret")
@@ -169,17 +176,19 @@ if __name__ == "__main__":
         print("Please provide a config path as the first argument.", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        with open("./secret", "r") as f:
-            print("Using Secret key from ./secret for authentication:")
-    except Exception as e:
-        print("No existing secret key found. A new one will be generated and saved to ./secret.")
-        
-        expected_secret = secrets.token_hex(64)
-        with open("./secret", "w") as f:
-            f.write(expected_secret)
-        print(f"Generated new Secret key and saved to ./secret: {expected_secret}")
+    if not DEV:
+        try:
+            with open("./secret", "r") as f:
+                print("Using Secret key from ./secret for authentication:")
+        except Exception as e:
+            print("No existing secret key found. A new one will be generated and saved to ./secret.")
+            
+            expected_secret = secrets.token_hex(64)
+            with open("./secret", "w") as f:
+                f.write(expected_secret)
+            print(f"Generated new Secret key and saved to ./secret: {expected_secret}")
 
     print("DEBUG mode:", base.DEBUG)
+    print("DEV mode:", DEV)
     base.load_config(argv[0])
     asyncio.run(main())
