@@ -84,57 +84,6 @@ let CONFIG = /** @type {any} */ (null);
 let CONFIG_PATH = "";
 
 /**
- * @param {string} text 
- * @param {number} minLength 
- * @param {number} maxLength
- * @return {{
- *      repetitionAt: string,
- *      amount: number,
- *   } | null
- * }
- */
-function patternRepetitionChecker(text, minLength, maxLength) {
-    if (text.length < minLength) {
-        return null;
-    }
-    for (let length = minLength; length <= Math.min(maxLength, text.length); length++) {
-        const pattern = text.slice(0, length);
-        const splitted = text.split(pattern);
-        if (splitted.every(s => s === "")) {
-            const occurrences = splitted.length - 1;
-            if (occurrences > 1) {
-                return {
-                    repetitionAt: pattern,
-                    amount: occurrences,
-                };
-            }
-        }
-    }
-    return null;
-}
-
-/**
- * @param {string} text
- * @return {boolean}
- */
-function aggressiveListRepetitionChecker(text) {
-    const splitted = text.split(",").map(s => s.trim()).filter(s => s.length > 0);
-    if (splitted.length === 1) {
-        return false;
-    }
-    let hasHadAnotherItemDifferentFromFirst = false;
-    for (let i = 1; i < splitted.length; i++) {
-        const item = splitted[i];
-        if (item === splitted[0] && hasHadAnotherItemDifferentFromFirst) {
-            return true;
-        } else if (item !== splitted[0]) {
-            hasHadAnotherItemDifferentFromFirst = true;
-        }
-    }
-    return false;
-}
-
-/**
  * @param {*} config 
  */
 function checkConfigValidity(config) {
@@ -337,8 +286,6 @@ export async function prepareAnalysis(data, onDone, onError) {
  * maxCharacters: number;
  * trail: string | null;
  * grammar: string | null;
- * repetitionBuster?: boolean;
- * aggressiveListRepetitionBuster?: boolean;
  * }} data
  * @param {(v: string) => void} onAnswer 
  * @param {(err: Error) => void} onError 
@@ -384,14 +331,6 @@ export async function runQuestion(data, onAnswer, onError) {
 
     if (data.grammar !== null && typeof data.grammar !== "string") {
         throw new Error("Invalid grammar format");
-    }
-
-    if (data.repetitionBuster !== undefined && typeof data.repetitionBuster !== "boolean") {
-        throw new Error("Invalid repetitionBuster format");
-    }
-
-    if (data.aggressiveListRepetitionBuster !== undefined && typeof data.aggressiveListRepetitionBuster !== "boolean") {
-        throw new Error("Invalid aggressiveListRepetitionBuster format");
     }
 
     const regexStopAfter = data.stopAfter.map(s => new RegExp(`(^|[.,;])\\s*${escapeRegExp(s)}\\s*([.,;]|$)`, 'i'));
@@ -520,23 +459,6 @@ export async function runQuestion(data, onAnswer, onError) {
                                 return;
                             }
                         }
-                    }
-
-                    if (data.repetitionBuster) {
-                        const repetition = patternRepetitionChecker(answer, 5, 300);
-                        if (repetition && repetition.amount >= 3) {
-                            console.log("\nAborting completion due to repetition detected:", repetition);
-                            CONTROLLER?.abort();
-                            CONTROLLER = null;
-                            return;
-                        }
-                    }
-
-                    if (data.aggressiveListRepetitionBuster && aggressiveListRepetitionChecker(answer)) {
-                        console.log("\nAborting completion due to aggressive list repetition detected");
-                        CONTROLLER?.abort();
-                        CONTROLLER = null;
-                        return;
                     }
                 } catch (e) {
                     // @ts-ignore

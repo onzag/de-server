@@ -108,43 +108,6 @@ def escape_regexp(string: str) -> str:
     """Escape special regex characters."""
     return re.escape(string)
 
-
-def pattern_repetition_checker(text: str, min_length: int, max_length: int):
-    """
-    Check if `text` is composed entirely of a repeated pattern of length
-    between min_length and max_length.
-    Returns {"repetitionAt": pattern, "amount": count} or None.
-    """
-    if len(text) < min_length:
-        return None
-    for length in range(min_length, min(max_length, len(text)) + 1):
-        pattern = text[:length]
-        parts = text.split(pattern)
-        if all(s == "" for s in parts):
-            occurrences = len(parts) - 1
-            if occurrences > 1:
-                return {"repetitionAt": pattern, "amount": occurrences}
-    return None
-
-
-def aggressive_list_repetition_checker(text: str) -> bool:
-    """
-    Returns True when a comma-separated list contains a repeated item
-    after at least one different item has appeared.
-    """
-    parts = [s.strip() for s in text.split(",") if s.strip()]
-    if len(parts) <= 1:
-        return False
-    first = parts[0]
-    has_had_different = False
-    for item in parts[1:]:
-        if item == first and has_had_different:
-            return True
-        elif item != first:
-            has_had_different = True
-    return False
-
-
 def check_config_validity(config: dict) -> None:
     """Validate a generation-config section (standard / analyze)."""
     if not isinstance(config.get("maxTokens"), (int, float)):
@@ -500,10 +463,6 @@ async def run_question(
         raise ValueError("Invalid trail format")
     if data.get("grammar") is not None and not isinstance(data["grammar"], str):
         raise ValueError("Invalid grammar format")
-    if data.get("repetitionBuster") is not None and not isinstance(data["repetitionBuster"], bool):
-        raise ValueError("Invalid repetitionBuster format")
-    if data.get("aggressiveListRepetitionBuster") is not None and not isinstance(data["aggressiveListRepetitionBuster"], bool):
-        raise ValueError("Invalid aggressiveListRepetitionBuster format")
 
     regex_stop_after = [
         re.compile(rf"(^|[.,;])\s*{escape_regexp(s)}\s*([.,;]|$)", re.IGNORECASE)
@@ -588,18 +547,6 @@ async def run_question(
                         print(f"\nAborting completion due to stopAfter trigger: {stop_re.pattern}")
                         await MODEL.abort(request_id)
                         break
-
-            if data.get("repetitionBuster"):
-                rep = pattern_repetition_checker(answer, 5, 300)
-                if rep and rep["amount"] >= 3:
-                    print(f"\nAborting completion due to repetition detected: {rep}")
-                    await MODEL.abort(request_id)
-                    break
-
-            if data.get("aggressiveListRepetitionBuster") and aggressive_list_repetition_checker(answer):
-                print("\nAborting completion due to aggressive list repetition detected")
-                await MODEL.abort(request_id)
-                break
 
         answer = _strip_trailing_newlines(answer)
         
