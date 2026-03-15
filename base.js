@@ -23,6 +23,7 @@
  * {
  *  // the path of the model relative to the json file
  *   "modelPath": "./model.json",
+ *   "mode": "mistral",
  *   // standard generation used in roleplay contexts
  *   "standard": {
  *       // temperature base

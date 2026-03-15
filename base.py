@@ -23,7 +23,9 @@ JSON File settings example:
 {
     // the path of the model relative to the json file
     "modelPath": "./model.gguf",
+    "mode": "mistral",
     // standard generation used in roleplay contexts
+    "enforceEager": false,
     "standard": {
         "temperature": 1.0,
         "maxTokens": 512,

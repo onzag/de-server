@@ -2,6 +2,7 @@
 /__pycache__
 /node_modules
 /models
+/pyenv
 .runpod_jobs.pkl
 .runpod_jobs.pkl.lock
 secret
