@@ -75,7 +75,7 @@ function escapeRegExp(string) {
 /**
  * @type {{
  *    modelPath: string;
- *    mode?: "mistral" | "llama3";
+ *    mode: "mistral" | "llama3";
  *    standard: {temperature: number; temperatureRange?: [number, number]; topP?: number; minP?: number; repeatPenalty?: number; frequencyPenalty?: number; presencePenalty?: number; maxTokens: number;},
  *    analyze: {temperature: number; temperatureRange?: [number, number]; topP?: number; minP?: number; repeatPenalty?: number; frequencyPenalty?: number; presencePenalty?: number; maxTokens: number;},
  * }}

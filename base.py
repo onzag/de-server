@@ -555,7 +555,6 @@ async def run_question(
         print(str(e))
         yield {"error": str(e)}
 
-
 async def generate_completion(
     data: dict,
 ):

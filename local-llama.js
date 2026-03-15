@@ -6,10 +6,61 @@
 
 import { WebSocketServer } from "ws";
 import { CONTROLLER, MODEL, generateCompletion, prepareAnalysis, runQuestion } from "./base.js";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { randomBytes } from "crypto";
+import { URL } from "url";
+import { createServer as createHttpsServer } from "https";
+import { createServer as createHttpServer } from "http";
 
-console.log("Starting Local LLaMA WebSocket Server, listening on ws://0.0.0.0:8765");
+const DEV = process.env.DEV === "1";
+const SSL = process.env.SSL === "1";
 
-const wss = new WebSocketServer({ port: 8765, host: '0.0.0.0' });
+let expectedSecret;
+if (!DEV) {
+    if (existsSync("./secret")) {
+        expectedSecret = readFileSync("./secret", "utf-8").trim();
+        console.log("Using Secret key from ./secret for authentication");
+    } else {
+        expectedSecret = randomBytes(64).toString("hex");
+        writeFileSync("./secret", expectedSecret);
+        console.log(`Generated new Secret key and saved to ./secret: ${expectedSecret}`);
+    }
+} else {
+    expectedSecret = "dev-secret-12345678900abcdef";
+}
+
+console.log("DEV mode:", DEV);
+console.log("SSL mode:", SSL);
+console.log(`Starting Local LLaMA WebSocket Server, listening on ${SSL ? "wss" : "ws"}://0.0.0.0:8765`);
+
+const verifyClient = (info) => {
+    const url = new URL(info.req.url, `http://${info.req.headers.host}`);
+    const secret = url.searchParams.get("secret");
+    if (secret !== expectedSecret) {
+        console.log("Unauthorized connection attempt with invalid secret");
+        return false;
+    }
+    console.log("Client authenticated successfully");
+    return true;
+};
+
+let server;
+if (SSL) {
+    try {
+        server = createHttpsServer({
+            cert: readFileSync("./cert.pem"),
+            key: readFileSync("./key.pem"),
+        });
+    } catch (e) {
+        console.error("Failed to create SSL server:", e.message);
+        process.exit(1);
+    }
+} else {
+    server = createHttpServer();
+}
+
+const wss = new WebSocketServer({ server, verifyClient });
+server.listen(8765, '0.0.0.0');
 
 let CONTEXT_WINDOW_SIZE = 2048 * 4; // 8k context
 if (process.env.CONTEXT_WINDOW_SIZE) {
@@ -19,47 +70,62 @@ if (process.env.CONTEXT_WINDOW_SIZE) {
     }
 }
 
+/**
+ * @type {Promise<void>}
+ */
+let lastGenerationPromise = Promise.resolve();
+
 wss.on('connection', (ws) => {
     console.log('Client connected');
 
     ws.send(JSON.stringify({ type: 'ready', message: 'Model is ready', context_window_size: CONTEXT_WINDOW_SIZE, supports_parallel_requests: false }));
 
     ws.on('message', async (message) => {
+        let rid = "no-rid";
         try {
             // @ts-ignore
             const data = JSON.parse(message);
-            const rid = data.rid || "no-rid";
+            rid = data.rid || "no-rid";
 
             // Handle different actions
             if (data.action === 'infer') {
                 if (!data.payload) {
                     throw new Error("Invalid payload for infer");
                 }
-                await generateCompletion(data.payload, (text) => {
-                    ws.send(JSON.stringify({ type: 'token', rid, text }));
-                }, () => {
-                    ws.send(JSON.stringify({ type: 'done', rid }));
-                }, (error) => {
-                    ws.send(JSON.stringify({ type: 'error', rid, message: error.message }));
+                lastGenerationPromise = lastGenerationPromise.catch(() => {}).then(() => {
+                    return generateCompletion(data.payload, (text) => {
+                        ws.send(JSON.stringify({ type: 'token', rid, text }));
+                    }, () => {
+                        ws.send(JSON.stringify({ type: 'done', rid }));
+                    }, (error) => {
+                        ws.send(JSON.stringify({ type: 'error', rid, message: error.message }));
+                    });
                 });
+                await lastGenerationPromise;
             } else if (data.action === 'analyze-prepare') {
                 if (!data.payload) {
                     throw new Error("Invalid payload for analyze-prepare");
                 }
-                await prepareAnalysis(data.payload, () => {
-                    ws.send(JSON.stringify({ type: 'analyze-ready', rid }));
-                }, (error) => {
-                    ws.send(JSON.stringify({ type: 'error', rid, message: error.message }));
+                lastGenerationPromise = lastGenerationPromise.catch(() => {}).then(() => {
+                    return prepareAnalysis(data.payload, () => {
+                        ws.send(JSON.stringify({ type: 'analyze-ready', rid }));
+                    }, (error) => {
+                        ws.send(JSON.stringify({ type: 'error', rid, message: error.message }));
+                    });
                 });
+                await lastGenerationPromise;
             } else if (data.action === 'analyze-question') {
                 if (!data.payload) {
                     throw new Error("Invalid payload for analyze-question");
                 }
-                await runQuestion(data.payload, (text) => {
-                    ws.send(JSON.stringify({ type: 'answer', rid, text }));
-                }, (error) => {
-                    ws.send(JSON.stringify({ type: 'error', rid, message: error.message }));
+                lastGenerationPromise = lastGenerationPromise.catch(() => {}).then(() => {
+                    return runQuestion(data.payload, (text) => {
+                        ws.send(JSON.stringify({ type: 'answer', rid, text }));
+                    }, (error) => {
+                        ws.send(JSON.stringify({ type: 'error', rid, message: error.message }));
+                    });
                 });
+                await lastGenerationPromise;
             } else if (data.action === 'count-tokens') {
                 if (!data.payload || typeof data.payload.text !== "string") {
                     throw new Error("Invalid payload for count-tokens");
