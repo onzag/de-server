@@ -25,10 +25,18 @@ HOST = '0.0.0.0'
 # get the DEV=1 environment variable to make a simpler secret for development
 DEV = os.getenv("DEV", "0") == "1"
 
+END_TOKEN = None  # This will be set after loading the config
+
 async def handle_client(websocket):
     print('Client connected')
 
-    await websocket.send(json.dumps({"type": "ready", "message": "Model is ready", "context_window_size": base.CONTEXT_WINDOW_SIZE, "supports_parallel_requests": True}))
+    await websocket.send(json.dumps({
+        "type": "ready",
+        "message": "Model is ready",
+        "context_window_size": base.CONTEXT_WINDOW_SIZE,
+        "supports_parallel_requests": True,
+        "end_token": END_TOKEN
+    }))
 
     loop = asyncio.get_event_loop()
     executor = None  # Use default executor (main thread)
@@ -190,5 +198,5 @@ if __name__ == "__main__":
 
     print("DEBUG mode:", base.DEBUG)
     print("DEV mode:", DEV)
-    base.load_config(argv[0])
+    END_TOKEN = base.load_config(argv[0])["end_token"]  # Load the config and set the END_TOKEN based on the model mode
     asyncio.run(main())

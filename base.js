@@ -144,9 +144,10 @@ function checkConfigValidity(config) {
 export let CONTROLLER = null;
 
 /**
- * @param {string} configPath 
+ * @param {string} configPath
+ * @return {Promise<{endToken: string}>} The end token to use for the current model, based on the config mode
  */
-async function loadConfig(configPath) {
+export async function loadConfig(configPath) {
     console.log("Loading config:", configPath);
 
     const configContent = await fs.promises.readFile(configPath, 'utf-8');
@@ -172,6 +173,12 @@ async function loadConfig(configPath) {
         const baseDir = path.dirname(configPath);
         const modelFullPath = path.resolve(baseDir, CONFIG.modelPath);
         await loadModel(modelFullPath);
+    }
+
+    if (CONFIG.mode === "mistral") {
+        return { endToken: "</s>" };
+    } else {
+        return { endToken: "<|eot_id|>" };
     }
 }
 
@@ -207,17 +214,9 @@ async function loadModel(model) {
     console.log('Model loaded successfully');
 }
 
-const argv = process.argv.slice(2);
-if (argv.length < 1) {
-    console.error("Please provide a model path as the first argument.");
-    process.exit(1);
-}
-
 const DEBUG = process.env.DEBUG === "1";
 
 console.log("DEBUG mode:", DEBUG);
-
-await loadConfig(argv[0]);
 
 /**
  * @type {import('node-llama-cpp').Token[] | null}
@@ -304,7 +303,6 @@ export async function runQuestion(data, onAnswer, onError) {
     if (!ANALYSIS_TEXT) {
         throw new Error("Analysis not prepared");
     }
-    CONTROLLER = new AbortController();
 
     if (!data.question || typeof data.question !== "string") {
         throw new Error("Invalid question format");
@@ -345,6 +343,7 @@ export async function runQuestion(data, onAnswer, onError) {
     let context = null
     let completion = null;
     let answer = "";
+    CONTROLLER = new AbortController();
     try {
         const grammar = data.grammar ? await LLAMA.createGrammar({
             grammar: data.grammar,
@@ -504,7 +503,6 @@ export async function generateCompletion(data, onToken, onDone, onError) {
     if (CONTROLLER) {
         throw new Error("Another generation is already in progress");
     }
-    CONTROLLER = new AbortController();
 
     if (!MODEL) {
         throw new Error("Model not loaded");
@@ -544,6 +542,10 @@ export async function generateCompletion(data, onToken, onDone, onError) {
         throw new Error("Invalid stopAfter format");
     }
 
+    if (data.grammar !== null && typeof data.grammar !== "string") {
+        throw new Error("Invalid grammar format");
+    }
+
     // clear previous analysis
     ANALYSIS_TEXT = null;
 
@@ -580,8 +582,13 @@ export async function generateCompletion(data, onToken, onDone, onError) {
         prompt += data.trail;
     }
 
+    const grammar = data.grammar ? await LLAMA.createGrammar({
+        grammar: data.grammar,
+    }) : undefined;
+
     let context = null
     let completion = null;
+    CONTROLLER = new AbortController();
     try {
         // Create context and completion for raw text
         context = await MODEL.createContext();
@@ -627,6 +634,7 @@ export async function generateCompletion(data, onToken, onDone, onError) {
             ...basicConfig,
             signal: CONTROLLER.signal,
             stopOnAbortSignal: true,
+            grammar,
             onTextChunk(textSrc) {
                 try {
                     const text = textSrc;

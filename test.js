@@ -1,4 +1,6 @@
-import { generateCompletion, prepareAnalysis, runQuestion } from "./base.js";
+import { generateCompletion, prepareAnalysis, runQuestion, loadConfig } from "./base.js";
+
+await loadConfig(argv[0]);
 
 // Useful for quickly testing if the generation works
 await generateCompletion({

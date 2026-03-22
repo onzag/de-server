@@ -5,7 +5,7 @@
 // and the model runs locally in the same machine
 
 import { WebSocketServer } from "ws";
-import { CONTROLLER, MODEL, generateCompletion, prepareAnalysis, runQuestion } from "./base.js";
+import { CONTROLLER, MODEL, generateCompletion, prepareAnalysis, runQuestion, loadConfig } from "./base.js";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { randomBytes } from "crypto";
 import { URL } from "url";
@@ -14,6 +14,14 @@ import { createServer as createHttpServer } from "http";
 
 const DEV = process.env.DEV === "1";
 const SSL = process.env.SSL === "1";
+
+const argv = process.argv.slice(2);
+if (argv.length < 1) {
+    console.error("Please provide a model path as the first argument.");
+    process.exit(1);
+}
+
+const END_TOKEN = (await loadConfig(argv[0])).endToken;
 
 let expectedSecret;
 if (!DEV) {
@@ -78,7 +86,13 @@ let lastGenerationPromise = Promise.resolve();
 wss.on('connection', (ws) => {
     console.log('Client connected');
 
-    ws.send(JSON.stringify({ type: 'ready', message: 'Model is ready', context_window_size: CONTEXT_WINDOW_SIZE, supports_parallel_requests: false }));
+    ws.send(JSON.stringify({
+        type: 'ready',
+        message: 'Model is ready',
+        context_window_size: CONTEXT_WINDOW_SIZE,
+        supports_parallel_requests: false,
+        end_token: END_TOKEN,
+    }));
 
     ws.on('message', async (message) => {
         let rid = "no-rid";

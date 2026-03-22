@@ -73,6 +73,7 @@ if os.environ.get("GPU_MEM_UTILIZATION"):
     except ValueError:
         print(f"Invalid GPU_MEM_UTILIZATION environment variable: {os.environ.get('GPU_MEM_UTILIZATION')}. Using default: {GPU_MEM_UTILIZATION}")
 
+
 # ── Module-level state (mirrors the JS globals) ──────────────────────────
 
 MODEL: Optional[Any] = None
@@ -213,7 +214,7 @@ def save_tokenizer(model_path: str, tokenizer_path: str) -> None:
     tokenizer.save_pretrained(tokenizer_path)
     print(f"Tokenizer saved to: {tokenizer_path}")
 
-def load_config(config_path: str, model_path_override: str | None = None) -> None:
+def load_config(config_path: str, model_path_override: str | None = None) -> str:
     global CONFIG, CONFIG_PATH
 
     print(f"Loading config: {config_path}")
@@ -285,6 +286,11 @@ def load_config(config_path: str, model_path_override: str | None = None) -> Non
         print(f"Resolved tokenizer path: {tokenizer_path}")
 
         load_model(model_full_path, tokenizer_path=tokenizer_path, enforce_eager=CONFIG.get("enforceEager", True))
+
+    if CONFIG.get("mode") == "mistral":
+        return {"end_token": "</s>"}
+    else:
+        return {"end_token": "<|eot_id|>"}
 
 
 # ── Sampling-params builder helpers ───────────────────────────────────────
@@ -592,6 +598,8 @@ async def generate_completion(
         raise ValueError("Invalid trail format")
     if not isinstance(data.get("stopAfter"), list):
         raise ValueError("Invalid stopAfter format")
+    if data.get("grammar") is not None and not isinstance(data["grammar"], str):
+        raise ValueError("Invalid grammar format")
 
     for msg in data["messages"]:
         if not isinstance(msg.get("content"), str):
@@ -606,7 +614,8 @@ async def generate_completion(
 
     prompt = _format_chat_prompt(CONFIG, data["messages"], data.get("trail"))
     stop_tokens = _build_stop_tokens(CONFIG, data.get("stopAt"))
-    sampling = _make_sampling_params(CONFIG["standard"], stop_tokens)
+    grammar = data.get("grammar")
+    sampling = _make_sampling_params(CONFIG["standard"], stop_tokens, grammar)
 
     max_paragraphs = int(data["maxParagraphs"])
     max_characters = int(data["maxCharacters"])
