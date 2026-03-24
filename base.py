@@ -424,8 +424,8 @@ async def prepare_analysis(
     if CONFIG is None:
         raise RuntimeError("Config not loaded")
     if not isinstance(data.get("system"), str) or not data["system"]:
-        raise ValueError("Invalid system format")
-    if not isinstance(data.get("userTrail"), str) or not data["userTrail"]:
+        raise ValueError("Invalid system format or missing")
+    if not isinstance(data.get("userTrail"), str):
         raise ValueError("Invalid userTrail format")
 
     try:

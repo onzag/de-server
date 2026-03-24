@@ -249,9 +249,9 @@ export async function prepareAnalysis(data, onDone, onError) {
         throw new Error("Config not loaded");
     }
     if (!data.system || typeof data.system !== "string") {
-        throw new Error("Invalid system format");
+        throw new Error("Invalid system format or missing");
     }
-    if (!data.userTrail || typeof data.userTrail !== "string") {
+    if (typeof data.userTrail !== "string") {
         throw new Error("Invalid userTrail format");
     }
     try {
