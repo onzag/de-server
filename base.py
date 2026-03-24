@@ -480,7 +480,12 @@ async def run_question(
     prompt = _format_question_prompt(CONFIG, ANALYSIS_TEXT, data["question"], data.get("trail"))
 
     stop_tokens = _build_stop_tokens(CONFIG, data.get("stopAt"))
-    sampling = _make_sampling_params(CONFIG["analyze"], stop_tokens, grammar=data.get("grammar"))
+
+    sampling_settings = CONFIG["analyze"]
+    if (data.get("gear") == "cardtype-gen"):
+        sampling_settings = CONFIG["standard"]
+
+    sampling = _make_sampling_params(sampling_settings, stop_tokens, grammar=data.get("grammar"))
 
     if DEBUG:
         print("Generation config: " + str(sampling))

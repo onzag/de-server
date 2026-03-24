@@ -354,20 +354,22 @@ export async function runQuestion(data, onAnswer, onError) {
             contextSequence: context.getSequence(),
         });
 
+        const CONFIG_TO_USE = data.gear === "cardtype-gen" ? CONFIG.standard : CONFIG.analyze;
+
         const basicConfig = {
-            temperature: CONFIG.analyze.temperature,
-            topP: CONFIG.analyze.topP,
-            minP: CONFIG.analyze.minP,
+            temperature: CONFIG_TO_USE.temperature,
+            topP: CONFIG_TO_USE.topP,
+            minP: CONFIG_TO_USE.minP,
             repeatPenalty: {
-                penalty: CONFIG.analyze.repeatPenalty,
-                frequencyPenalty: CONFIG.analyze.frequencyPenalty,
-                presencePenalty: CONFIG.analyze.presencePenalty,
+                penalty: CONFIG_TO_USE.repeatPenalty,
+                frequencyPenalty: CONFIG_TO_USE.frequencyPenalty,
+                presencePenalty: CONFIG_TO_USE.presencePenalty,
             },
             customStopTriggers: (CONFIG.mode === "mistral" ? ["</s>", "[INST]"] : ["<|eot_id|>", "<|start_header_id|>"]).concat(data.stopAt || []),
-            maxTokens: CONFIG.analyze.maxTokens || 512,
+            maxTokens: CONFIG_TO_USE.maxTokens || 512,
         }
-        if (CONFIG.analyze.temperatureRange) {
-            basicConfig.temperature = getDynamicTemperature(CONFIG.analyze.temperatureRange[0], CONFIG.analyze.temperatureRange[1]);
+        if (CONFIG_TO_USE.temperatureRange) {
+            basicConfig.temperature = getDynamicTemperature(CONFIG_TO_USE.temperatureRange[0], CONFIG_TO_USE.temperatureRange[1]);
         }
         if (typeof data.maxParagraphs === "number" && DEBUG) {
             console.log("Max paragraphs limit set to:", data.maxParagraphs);
@@ -494,7 +496,7 @@ export async function runQuestion(data, onAnswer, onError) {
 
 /**
  * 
- * @param {{messages: Array<{role: string, content: string}>, stopAt: Array<string>, stopAfter: Array<string>, maxParagraphs: number, maxCharacters: number, startCountingFromToken: string | null, trail: string | null}} data 
+ * @param {{messages: Array<{role: string, content: string}>, stopAt: Array<string>, stopAfter: Array<string>, maxParagraphs: number, maxCharacters: number, startCountingFromToken: string | null, trail: string | null, gear: string}} data 
  * @param {(text: string) => void} onToken 
  * @param {() => void} onDone 
  * @param {(error: Error) => void} onError 
