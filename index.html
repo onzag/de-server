@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DreamServer</title>
+<style>
+  body {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #111;
+    color: #ddd;
+    margin: 0;
+    padding: 2em;
+    line-height: 1.5;
+  }
+  h1 { color: #6cf; margin-top: 0; }
+  table { border-collapse: collapse; margin-top: 1em; }
+  th, td { padding: 0.4em 1em; border-bottom: 1px solid #333; text-align: left; vertical-align: top; }
+  th { color: #999; font-weight: normal; }
+  .ok    { color: #6f6; }
+  .warn  { color: #fc6; }
+  .muted { color: #888; }
+  code   { color: #fc6; }
+  .hint  { margin-top: 2em; padding: 1em; background: #1a1a1a; border-left: 3px solid #6cf; }
+</style>
+</head>
+<body>
+<h1>DreamServer / {{PROGRAM}}</h1>
+<p class="muted">This endpoint speaks WebSocket. Connect a client over <code>{{PROTOCOL}}://&lt;host&gt;:8765/?secret=…</code></p>
+
+<table>
+  <tr><th>Status</th>           <td class="ok">running</td></tr>
+  <tr><th>Protocol</th>         <td>{{PROTOCOL}}</td></tr>
+  <tr><th>Mode</th>             <td>{{DEV_MODE}}</td></tr>
+  <tr><th>SSL</th>              <td>{{SSL_MODE}}</td></tr>
+  <tr><th>Model loaded</th>     <td>{{MODEL_LOADED}}</td></tr>
+  <tr><th>Model path</th>       <td>{{MODEL_PATH}}</td></tr>
+  <tr><th>Config path</th>      <td>{{CONFIG_PATH}}</td></tr>
+  <tr><th>Config mode</th>      <td>{{CONFIG_MODE}}</td></tr>
+  <tr><th>End token</th>        <td><code>{{END_TOKEN}}</code></td></tr>
+  <tr><th>Context window</th>   <td>{{CONTEXT_WINDOW}}</td></tr>
+  <tr><th>GPU support</th>      <td>{{GPU}}</td></tr>
+  <tr><th>Uptime</th>           <td>{{UPTIME}}</td></tr>
+</table>
+
+<div class="hint">
+  If you reached this page through a self-signed certificate warning and clicked
+  <em>“Proceed anyway”</em>, the browser will now also accept
+  <code>wss://</code> connections to this same host:port from your Dream Engine
+  web app.
+</div>
+</body>
+</html>

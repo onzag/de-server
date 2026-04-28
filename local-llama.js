@@ -5,7 +5,7 @@
 // and the model runs locally in the same machine
 
 import { WebSocketServer } from "ws";
-import { CONTROLLER, MODEL, generateCompletion, prepareAnalysis, runQuestion, loadConfig } from "./base.js";
+import { CONTROLLER, MODEL, MODEL_PATH, generateCompletion, prepareAnalysis, runQuestion, loadConfig } from "./base.js";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { randomBytes } from "crypto";
 import { URL } from "url";
@@ -67,9 +67,6 @@ if (SSL) {
     server = createHttpServer();
 }
 
-const wss = new WebSocketServer({ server, verifyClient });
-server.listen(8765, '0.0.0.0');
-
 let CONTEXT_WINDOW_SIZE = 2048 * 4; // 8k context
 if (process.env.CONTEXT_WINDOW_SIZE) {
     const envSize = parseInt(process.env.CONTEXT_WINDOW_SIZE);
@@ -77,6 +74,90 @@ if (process.env.CONTEXT_WINDOW_SIZE) {
         CONTEXT_WINDOW_SIZE = envSize;
     }
 }
+
+// ── Static info page ──────────────────────────────────────────────────────
+// Load the HTML template once at startup. Visiting http(s)://host:8765/ in a
+// browser shows basic server status; this also gives users a way to manually
+// accept the self-signed certificate so subsequent wss:// connections work.
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const INDEX_HTML_TEMPLATE = readFileSync(join(__dirname, "index.html"), "utf-8");
+const SERVER_START_TIME = Date.now();
+const ARG_CONFIG_PATH = argv[0];
+
+/**
+ * @param {Record<string, string>} replacements
+ */
+function renderIndexHtml(replacements) {
+    return INDEX_HTML_TEMPLATE.replace(/\{\{(\w+)\}\}/g, (_, key) =>
+        Object.prototype.hasOwnProperty.call(replacements, key)
+            ? String(replacements[key])
+            : `{{${key}}}`,
+    );
+}
+
+/**
+ * @param {number} ms
+ */
+function formatUptime(ms) {
+    const s = Math.floor(ms / 1000);
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    const parts = [];
+    if (d) parts.push(`${d}d`);
+    if (h || d) parts.push(`${h}h`);
+    if (m || h || d) parts.push(`${m}m`);
+    parts.push(`${sec}s`);
+    return parts.join(" ");
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+server.on("request", (req, res) => {
+    // Only the root path serves the info page; everything else is 404.
+    const url = new URL(req.url || "/", `http://${req.headers.host}`);
+    if (url.pathname !== "/" && url.pathname !== "/index.html") {
+        res.statusCode = 404;
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.end("Not found");
+        return;
+    }
+
+    // MODEL_PATH and MODEL are live ES module bindings, so we always read
+    // their current values here without needing to re-import.
+    const html = renderIndexHtml({
+        PROTOCOL: SSL ? "wss" : "ws",
+        DEV_MODE: DEV ? "DEV (insecure secret)" : "production",
+        SSL_MODE: SSL ? "enabled" : "disabled",
+        MODEL_LOADED: MODEL ? "yes" : "no",
+        MODEL_PATH: escapeHtml(MODEL_PATH || "(none)"),
+        CONFIG_PATH: escapeHtml(ARG_CONFIG_PATH || "(none)"),
+        CONFIG_MODE: escapeHtml(process.env.CONFIG_MODE || "(see config file)"),
+        END_TOKEN: escapeHtml(END_TOKEN || ""),
+        CONTEXT_WINDOW: String(CONTEXT_WINDOW_SIZE),
+        GPU: escapeHtml(process.env.GPU || "auto"),
+        UPTIME: formatUptime(Date.now() - SERVER_START_TIME),
+        PROGRAM: "Node.js Local LLaMA Server",
+    });
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(html);
+});
+
+const wss = new WebSocketServer({ server, verifyClient });
+server.listen(8765, '0.0.0.0');
 
 /**
  * @type {Promise<void>}

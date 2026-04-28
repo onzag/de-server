@@ -63,7 +63,7 @@ import path from 'path';
  */
 export let MODEL = /** @type {any} */ (null);
 let LLAMA = await getLlama();
-let MODEL_PATH = "";
+export let MODEL_PATH = "";
 
 /**
  * @param {string} string 

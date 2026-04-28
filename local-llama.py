@@ -14,6 +14,7 @@ import json
 import secrets
 import ssl
 import sys
+import time
 import websockets
 import base
 from urllib.parse import urlparse, parse_qs
@@ -26,6 +27,70 @@ HOST = '0.0.0.0'
 DEV = os.getenv("DEV", "0") == "1"
 
 END_TOKEN = None  # This will be set after loading the config
+
+# ── Static info page ──────────────────────────────────────────────────────
+# Load the HTML template once at startup. Visiting https://host:8765/ in a
+# browser shows basic server status; this also gives users a way to manually
+# accept the self-signed certificate so subsequent wss:// connections work.
+_INDEX_HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+try:
+    with open(_INDEX_HTML_PATH, "r", encoding="utf-8") as _f:
+        INDEX_HTML_TEMPLATE = _f.read()
+except Exception as _e:
+    print(f"Warning: failed to load index.html template: {_e}")
+    INDEX_HTML_TEMPLATE = "<html><body><h1>DreamServer</h1><p>(template missing)</p></body></html>"
+
+SERVER_START_TIME = time.time()
+ARG_CONFIG_PATH = ""  # set in __main__
+
+
+def _html_escape(s: str) -> str:
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def _format_uptime(seconds: float) -> str:
+    s = int(seconds)
+    d, s = divmod(s, 86400)
+    h, s = divmod(s, 3600)
+    m, sec = divmod(s, 60)
+    parts = []
+    if d:
+        parts.append(f"{d}d")
+    if h or d:
+        parts.append(f"{h}h")
+    if m or h or d:
+        parts.append(f"{m}m")
+    parts.append(f"{sec}s")
+    return " ".join(parts)
+
+
+def _render_index_html() -> str:
+    replacements = {
+        "PROTOCOL": "wss",
+        "DEV_MODE": "DEV (insecure secret)" if DEV else "production",
+        "SSL_MODE": "enabled",
+        "MODEL_LOADED": "yes" if getattr(base, "MODEL", None) is not None else "no",
+        "MODEL_PATH": _html_escape(getattr(base, "MODEL_PATH", "") or "(none)"),
+        "CONFIG_PATH": _html_escape(ARG_CONFIG_PATH or "(none)"),
+        "CONFIG_MODE": _html_escape(os.environ.get("CONFIG_MODE", "(see config file)")),
+        "END_TOKEN": _html_escape(END_TOKEN or ""),
+        "CONTEXT_WINDOW": str(getattr(base, "CONTEXT_WINDOW_SIZE", "?")),
+        "GPU": _html_escape(os.environ.get("GPU", "auto")),
+        "UPTIME": _format_uptime(time.time() - SERVER_START_TIME),
+        "PROGRAM": "Python vLLM Server",
+    }
+    out = INDEX_HTML_TEMPLATE
+    for key, value in replacements.items():
+        out = out.replace("{{" + key + "}}", str(value))
+    return out
+
 
 async def handle_client(websocket):
     print('Client connected')
@@ -153,6 +218,19 @@ async def main():
 
 async def process_request(connection, request):
     parsed = urlparse(request.path)
+
+    # Serve a small public info page on root, no auth required. This lets
+    # users hit https://host:8765/ in a browser to accept the self-signed
+    # cert so subsequent wss:// connections from the web app work.
+    if parsed.path in ("/", "/index.html"):
+        body = _render_index_html().encode("utf-8")
+        headers = [
+            ("Content-Type", "text/html; charset=utf-8"),
+            ("Cache-Control", "no-store"),
+            ("Content-Length", str(len(body))),
+        ]
+        return (200, headers, body)
+
     query_params = parse_qs(parsed.query)
     secret = query_params.get('secret', [None])[0]
 
@@ -183,6 +261,8 @@ if __name__ == "__main__":
     if len(argv) < 1:
         print("Please provide a config path as the first argument.", file=sys.stderr)
         sys.exit(1)
+
+    ARG_CONFIG_PATH = argv[0]
 
     if not DEV:
         try:
