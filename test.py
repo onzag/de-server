@@ -20,7 +20,6 @@ async def main():
         "maxParagraphs": 0,
         "maxCharacters": 0,
         "maxSafetyCharacters": 0,
-        "startCountingFromToken": None,
         "trail": None
     })
 

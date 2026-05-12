@@ -597,8 +597,6 @@ async def generate_completion(
         raise ValueError("Invalid maxCharacters format")
     if not isinstance(data.get("maxSafetyCharacters"), (int, float)) or data["maxSafetyCharacters"] < 0:
         raise ValueError("Invalid maxSafetyCharacters format")
-    if data.get("startCountingFromToken") is not None and not isinstance(data["startCountingFromToken"], str):
-        raise ValueError("Invalid startCountingFromToken format")
     if data.get("trail") is not None and not isinstance(data["trail"], str):
         raise ValueError("Invalid trail format")
     if not isinstance(data.get("stopAfter"), list):
@@ -641,8 +639,6 @@ async def generate_completion(
         for s in data["stopAfter"]
     ]
 
-    start_counting_from = data.get("startCountingFromToken")
-
     try:
         request_id = _next_request_id()
         yield {"request_id": request_id}
@@ -650,7 +646,7 @@ async def generate_completion(
 
         accumulated_text = ""
         accumulated_counting = ""
-        has_begun_counting = start_counting_from is None
+        has_begun_counting = True
         prev_len = 0
 
         async for output in generation:

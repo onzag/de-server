@@ -12,7 +12,6 @@ await generateCompletion({
     stopAfter: [],
     maxParagraphs: 0,
     maxCharacters: 0,
-    startCountingFromToken: null,
     trail: null
 }, (text) => {
 }, () => {

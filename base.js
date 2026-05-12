@@ -496,7 +496,7 @@ export async function runQuestion(data, onAnswer, onError) {
 
 /**
  * 
- * @param {{messages: Array<{role: string, content: string}>, stopAt: Array<string>, stopAfter: Array<string>, maxParagraphs: number, maxCharacters: number, startCountingFromToken: string | null, trail: string | null, gear: string}} data 
+ * @param {{messages: Array<{role: string, content: string}>, stopAt: Array<string>, stopAfter: Array<string>, maxParagraphs: number, maxCharacters: number, trail: string | null, gear: string}} data 
  * @param {(text: string) => void} onToken 
  * @param {() => void} onDone 
  * @param {(error: Error) => void} onError 
@@ -530,10 +530,6 @@ export async function generateCompletion(data, onToken, onDone, onError) {
 
     if (typeof data.maxCharacters !== "number" || isNaN(data.maxCharacters) || data.maxCharacters < 0) {
         throw new Error("Invalid maxCharacters format");
-    }
-
-    if (data.startCountingFromToken !== null && typeof data.startCountingFromToken !== "string") {
-        throw new Error("Invalid startCountingFromToken format");
     }
 
     if (data.trail !== null && typeof data.trail !== "string") {
@@ -621,7 +617,7 @@ export async function generateCompletion(data, onToken, onDone, onError) {
             console.log("Max characters limit set to:", data.maxCharacters);
         }
 
-        let hasBegunCounting = data.startCountingFromToken === null ? true : false;
+        let hasBegunCounting = true
         let accumulatedText = "";
         let accumulatedTextForCounting = "";
 
@@ -644,9 +640,6 @@ export async function generateCompletion(data, onToken, onDone, onError) {
                     if (DEBUG) {
                         // use this weird character to denote token boundaries
                         process.stdout.write(text + "§");
-                    }
-                    if (!hasBegunCounting && data.startCountingFromToken && accumulatedText.includes(data.startCountingFromToken)) {
-                        hasBegunCounting = true;
                     }
                     // Always accumulate text if we need to track limits
                     if (hasBegunCounting) {
