@@ -7,11 +7,21 @@ import os
 import sys
 import json
 
-if len(sys.argv) < 2:
-    print("Usage: python download-model.py <model-name>")
+# Keep this in sync with MODES in base.py
+SUPPORTED_MODES = ("mistral", "llama3", "chatml", "gemma", "phi", "deepseek", "alpaca")
+
+if len(sys.argv) < 3:
+    print("Usage: python download-model.py <model-type> <model-name>")
+    print("  <model-type>: one of " + ", ".join(SUPPORTED_MODES))
     sys.exit(1)
 
-model_name = sys.argv[1]
+model_type = sys.argv[1]
+model_name = sys.argv[2]
+
+if model_type not in SUPPORTED_MODES:
+    print(f"Error: unknown model-type '{model_type}'.")
+    print("Supported model types: " + ", ".join(SUPPORTED_MODES))
+    sys.exit(1)
 
 # make the models directory if it doesn't exist
 if not os.path.exists("models"):
@@ -84,7 +94,7 @@ for file in files_info:
 default_json = {
     "modelPath": "./models/" + model_name,
     "enforceEager": False,
-    "mode": "mistral",
+    "mode": model_type,
     "standard": {
         "temperature": 1.0,
         "dynamicTemperature": [0.8, 1.05],

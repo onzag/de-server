@@ -6,4 +6,4 @@
 
 bash install-python-deps.sh
 bash create-ssl-keys.sh
-./pyenv/bin/python download-model.py Firworks/Behemoth-X-123B-v2.1-nvfp4
+./pyenv/bin/python download-model.py mistral Firworks/Behemoth-X-123B-v2.1-nvfp4

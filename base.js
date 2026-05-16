@@ -22,8 +22,7 @@
  * 
  * {
  *  // the path of the model relative to the json file
- *   "modelPath": "./model.json",
- *   "mode": "mistral",
+ *   "modelPath": "./model.json", *   // chat template: mistral | llama3 | chatml | gemma | phi | deepseek | alpaca *   "mode": "mistral",
  *   // standard generation used in roleplay contexts
  *   "standard": {
  *       // temperature base
@@ -59,6 +58,173 @@ const { LlamaCompletion, getLlama } = await import('node-llama-cpp');
 import path from 'path';
 
 /**
+ * Chat-template registry. Each mode describes how to format prompts and
+ * which strings should act as stop triggers for the given model family.
+ *
+ * To add support for another model type, add a new entry to this object.
+ *
+ * Fields:
+ *   - endToken: token returned by loadConfig() over the wire to indicate
+ *               the end of an assistant turn for this template.
+ *   - stopTokens: hard stop strings appended to the user-supplied stopAt.
+ *   - chatBos: prefix prepended once at the start of a chat-style prompt.
+ *   - formatChatMessage(role, content): serializes one chat message.
+ *   - chatAssistantHeader: opens the trailing assistant turn for chat.
+ *   - analysisPrefix(system, userTrail): opens the user turn for analysis,
+ *               leaving it open so a question can be appended later.
+ *   - analysisToQuestion(analysisText, question, trail): closes the analysis
+ *               user turn, appends the question and opens the assistant turn.
+ *
+ * @type {Record<string, {
+ *   endToken: string,
+ *   stopTokens: string[],
+ *   chatBos: string,
+ *   formatChatMessage: (role: string, content: string) => string,
+ *   chatAssistantHeader: string,
+ *   analysisPrefix: (system: string, userTrail: string) => string,
+ *   analysisToQuestion: (analysisText: string, question: string, trail: string | null) => string,
+ * }>}
+ */
+export const MODES = {
+    mistral: {
+        endToken: "</s>",
+        stopTokens: ["</s>", "[INST]"],
+        chatBos: "<s>",
+        formatChatMessage: (role, content) =>
+            role === "system"
+                ? `[SYSTEM_PROMPT] ${content}[/SYSTEM_PROMPT][INST]`
+                : `\n\n${content}`,
+        chatAssistantHeader: "[/INST]\n\n",
+        analysisPrefix: (system, userTrail) =>
+            `<s>[SYSTEM_PROMPT] ${system}[/SYSTEM_PROMPT][INST] ${userTrail}`,
+        analysisToQuestion: (analysisText, question, trail) =>
+            analysisText + "\n\n" + question + "\n[/INST]\n\n" + (trail || ""),
+    },
+    llama3: {
+        endToken: "<|eot_id|>",
+        stopTokens: ["<|eot_id|>", "<|start_header_id|>"],
+        chatBos: "",
+        formatChatMessage: (role, content) =>
+            `<|start_header_id|>${role}<|end_header_id|>\n\n${content}<|eot_id>`,
+        chatAssistantHeader: "\n<|start_header_id|>assistant<|end_header_id|>\n\n",
+        analysisPrefix: (system, userTrail) =>
+            `<|start_header_id|>system<|end_header_id|>\n\n${system}<|eot_id><|start_header_id|>user<|end_header_id|>\n\n${userTrail}`,
+        analysisToQuestion: (analysisText, question, trail) =>
+            analysisText + "\n" + question
+            + `\n<|start_header_id|>assistant<|end_header_id|>\n\n`
+            + (trail || ""),
+    },
+    // Qwen, Hermes, Yi, generic ChatML
+    chatml: {
+        endToken: "<|im_end|>",
+        stopTokens: ["<|im_end|>", "<|im_start|>"],
+        chatBos: "",
+        formatChatMessage: (role, content) =>
+            `<|im_start|>${role}\n${content}<|im_end|>\n`,
+        chatAssistantHeader: "<|im_start|>assistant\n",
+        analysisPrefix: (system, userTrail) =>
+            `<|im_start|>system\n${system}<|im_end|>\n<|im_start|>user\n${userTrail}`,
+        analysisToQuestion: (analysisText, question, trail) =>
+            analysisText + "\n\n" + question
+            + "<|im_end|>\n<|im_start|>assistant\n"
+            + (trail || ""),
+    },
+    // Google Gemma / Gemma2 (no dedicated system role: merged into first user turn)
+    gemma: {
+        endToken: "<end_of_turn>",
+        stopTokens: ["<end_of_turn>", "<start_of_turn>"],
+        chatBos: "<bos>",
+        formatChatMessage: (role, content) => {
+            if (role === "system") {
+                return `<start_of_turn>user\n${content}<end_of_turn>\n`;
+            }
+            const r = role === "assistant" ? "model" : "user";
+            return `<start_of_turn>${r}\n${content}<end_of_turn>\n`;
+        },
+        chatAssistantHeader: "<start_of_turn>model\n",
+        analysisPrefix: (system, userTrail) =>
+            `<bos><start_of_turn>user\n${system}\n\n${userTrail}`,
+        analysisToQuestion: (analysisText, question, trail) =>
+            analysisText + "\n\n" + question
+            + "<end_of_turn>\n<start_of_turn>model\n"
+            + (trail || ""),
+    },
+    // Microsoft Phi-3 / Phi-4
+    phi: {
+        endToken: "<|end|>",
+        stopTokens: ["<|end|>", "<|user|>", "<|system|>"],
+        chatBos: "",
+        formatChatMessage: (role, content) =>
+            `<|${role}|>\n${content}<|end|>\n`,
+        chatAssistantHeader: "<|assistant|>\n",
+        analysisPrefix: (system, userTrail) =>
+            `<|system|>\n${system}<|end|>\n<|user|>\n${userTrail}`,
+        analysisToQuestion: (analysisText, question, trail) =>
+            analysisText + "\n\n" + question
+            + "<|end|>\n<|assistant|>\n"
+            + (trail || ""),
+    },
+    // DeepSeek V2 / V3 / R1 style
+    deepseek: {
+        endToken: "<｜end▁of▁sentence｜>",
+        stopTokens: ["<｜end▁of▁sentence｜>", "<｜User｜>"],
+        chatBos: "<｜begin▁of▁sentence｜>",
+        formatChatMessage: (role, content) => {
+            if (role === "system") return content;
+            if (role === "user") return `<｜User｜>${content}`;
+            return `<｜Assistant｜>${content}<｜end▁of▁sentence｜>`;
+        },
+        chatAssistantHeader: "<｜Assistant｜>",
+        analysisPrefix: (system, userTrail) =>
+            `<｜begin▁of▁sentence｜>${system}<｜User｜>${userTrail}`,
+        analysisToQuestion: (analysisText, question, trail) =>
+            analysisText + "\n\n" + question
+            + "<｜Assistant｜>"
+            + (trail || ""),
+    },
+    // Classic Alpaca instruction format
+    alpaca: {
+        endToken: "</s>",
+        stopTokens: ["</s>", "### Instruction:"],
+        chatBos: "",
+        formatChatMessage: (role, content) => {
+            if (role === "system") return `${content}\n\n`;
+            if (role === "user") return `### Instruction:\n${content}\n\n`;
+            return `### Response:\n${content}\n\n`;
+        },
+        chatAssistantHeader: "### Response:\n",
+        analysisPrefix: (system, userTrail) =>
+            `${system}\n\n### Instruction:\n${userTrail}`,
+        analysisToQuestion: (analysisText, question, trail) =>
+            analysisText + "\n\n" + question
+            + "\n\n### Response:\n"
+            + (trail || ""),
+    },
+};
+
+const DEFAULT_MODE = "llama3";
+
+/**
+ * @param {string | undefined} mode
+ * @returns {string}
+ */
+function resolveModeName(mode) {
+    return mode || DEFAULT_MODE;
+}
+
+/**
+ * @param {string | undefined} mode
+ */
+function getMode(mode) {
+    const name = resolveModeName(mode);
+    const m = MODES[name];
+    if (!m) {
+        throw new Error(`Unsupported mode '${name}'. Supported modes: ${Object.keys(MODES).join(", ")}`);
+    }
+    return m;
+}
+
+/**
  * @type {import('node-llama-cpp').LlamaModel}
  */
 export let MODEL = /** @type {any} */ (null);
@@ -76,7 +242,7 @@ function escapeRegExp(string) {
 /**
  * @type {{
  *    modelPath: string;
- *    mode: "mistral" | "llama3";
+ *    mode: keyof typeof MODES;
  *    standard: {temperature: number; temperatureRange?: [number, number]; topP?: number; minP?: number; repeatPenalty?: number; frequencyPenalty?: number; presencePenalty?: number; maxTokens: number;},
  *    analyze: {temperature: number; temperatureRange?: [number, number]; topP?: number; minP?: number; repeatPenalty?: number; frequencyPenalty?: number; presencePenalty?: number; maxTokens: number;},
  * }}
@@ -164,8 +330,10 @@ export async function loadConfig(configPath) {
 
     console.log("Config loaded successfully");
 
-    if (CONFIG.mode !== "mistral" && CONFIG.mode !== "llama3" && CONFIG.mode !== undefined) {
-        throw new Error("Invalid config: mode must be 'mistral' or 'llama3' if provided");
+    if (CONFIG.mode !== undefined && !MODES[CONFIG.mode]) {
+        throw new Error(
+            `Invalid config: mode must be one of ${Object.keys(MODES).join(", ")} if provided`
+        );
     }
 
     if (MODEL_PATH !== CONFIG.modelPath) {
@@ -175,11 +343,7 @@ export async function loadConfig(configPath) {
         await loadModel(modelFullPath);
     }
 
-    if (CONFIG.mode === "mistral") {
-        return { endToken: "</s>" };
-    } else {
-        return { endToken: "<|eot_id|>" };
-    }
+    return { endToken: getMode(CONFIG.mode).endToken };
 }
 
 /**
@@ -260,11 +424,7 @@ export async function prepareAnalysis(data, onDone, onError) {
         //contextSequence.eraseContextTokenRanges
 
         // TODO optimize this, for now just retokenize every time
-        if (CONFIG.mode === "mistral") {
-            ANALYSIS_TEXT = `<s>[SYSTEM_PROMPT] ${data.system}[/SYSTEM_PROMPT][INST] ${data.userTrail}`;
-        } else {
-            ANALYSIS_TEXT = `<|start_header_id|>system<|end_header_id|>\n\n${data.system}<|eot_id><|start_header_id|>user<|end_header_id|>\n\n${data.userTrail}`;
-        }
+        ANALYSIS_TEXT = getMode(CONFIG.mode).analysisPrefix(data.system, data.userTrail);
 
         if (DEBUG) {
             console.log("Prepared analysis text:", ANALYSIS_TEXT);
@@ -334,12 +494,8 @@ export async function runQuestion(data, onAnswer, onError) {
 
     const regexStopAfter = data.stopAfter.map(s => new RegExp(`(^|[.,;])\\s*${escapeRegExp(s)}\\s*([.,;]|$)`, 'i'));
 
-    let prompt = "";
-    if (CONFIG.mode === "mistral") {
-        prompt = ANALYSIS_TEXT + "\n\n" + data.question + `\n[/INST]\n\n` + (data.trail || "");
-    } else {
-        prompt = ANALYSIS_TEXT + "\n" + data.question + `\n<|start_header_id|>assistant<|end_header_id|>\n\n` + (data.trail || "");
-    }
+    const modeImpl = getMode(CONFIG.mode);
+    let prompt = modeImpl.analysisToQuestion(ANALYSIS_TEXT, data.question, data.trail);
     let context = null
     let completion = null;
     let answer = "";
@@ -365,7 +521,7 @@ export async function runQuestion(data, onAnswer, onError) {
                 frequencyPenalty: CONFIG_TO_USE.frequencyPenalty,
                 presencePenalty: CONFIG_TO_USE.presencePenalty,
             },
-            customStopTriggers: (CONFIG.mode === "mistral" ? ["</s>", "[INST]"] : ["<|eot_id|>", "<|start_header_id|>"]).concat(data.stopAt || []),
+            customStopTriggers: modeImpl.stopTokens.concat(data.stopAt || []),
             maxTokens: CONFIG_TO_USE.maxTokens || 512,
         }
         if (CONFIG_TO_USE.temperatureRange) {
@@ -547,10 +703,8 @@ export async function generateCompletion(data, onToken, onDone, onError) {
     // clear previous analysis
     ANALYSIS_TEXT = null;
 
-    let prompt = "";
-    if (CONFIG.mode === "mistral") {
-        prompt += "<s>";
-    }
+    const modeImpl = getMode(CONFIG.mode);
+    let prompt = modeImpl.chatBos;
     for (const msg of data.messages) {
         if (typeof msg.content !== "string") {
             throw new Error("Invalid message content");
@@ -559,22 +713,9 @@ export async function generateCompletion(data, onToken, onDone, onError) {
         } else if (!["user", "assistant", "system"].includes(msg.role)) {
             throw new Error("Invalid message role: " + msg.role);
         }
-        if (CONFIG.mode === "mistral") {
-            if (msg.role === "system") {
-                prompt += `[SYSTEM_PROMPT] ${msg.content}[/SYSTEM_PROMPT][INST]`;
-            } else {
-                prompt += "\n\n" + msg.content
-            }
-        } else {
-            prompt += `<|start_header_id|>${msg.role}<|end_header_id|>\n\n${msg.content}<|eot_id>`;
-        }
-
+        prompt += modeImpl.formatChatMessage(msg.role, msg.content);
     }
-    if (CONFIG.mode === "mistral") {
-        prompt += "[/INST]\n\n";
-    } else {
-        prompt += "\n<|start_header_id|>assistant<|end_header_id|>\n\n";
-    }
+    prompt += modeImpl.chatAssistantHeader;
 
     if (data.trail) {
         prompt += data.trail;
@@ -603,7 +744,7 @@ export async function generateCompletion(data, onToken, onDone, onError) {
                 frequencyPenalty: CONFIG.standard.frequencyPenalty,
                 presencePenalty: CONFIG.standard.presencePenalty,
             },
-            customStopTriggers: (CONFIG.mode === "mistral" ? ["</s>", "[INST]"] : ["<|eot_id|>", "<|start_header_id|>"]).concat(data.stopAt || []),
+            customStopTriggers: modeImpl.stopTokens.concat(data.stopAt || []),
             maxTokens: CONFIG.standard.maxTokens || 512,
         }
         if (CONFIG.standard.temperatureRange) {

@@ -6,4 +6,4 @@
 
 bash install-python-deps.sh
 bash create-ssl-keys.sh
-./pyenv/bin/python download-model.py sh0ck0r/Behemoth-X-123B-v2.1-FP8-Dynamic
+./pyenv/bin/python download-model.py mistral sh0ck0r/Behemoth-X-123B-v2.1-FP8-Dynamic

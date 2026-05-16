@@ -23,6 +23,7 @@ JSON File settings example:
 {
     // the path of the model relative to the json file
     "modelPath": "./model.gguf",
+    // chat template: mistral | llama3 | chatml | gemma | phi | deepseek | alpaca
     "mode": "mistral",
     // standard generation used in roleplay contexts
     "enforceEager": false,
@@ -83,6 +84,168 @@ CONFIG: Optional[dict] = None
 CONFIG_PATH: str = ""
 ANALYSIS_TEXT: Optional[str] = None
 DEBUG: bool = os.environ.get("DEBUG", "") == "1"
+
+# ── Chat-template registry ────────────────────────────────────────────────
+#
+# Each entry describes how to format prompts and which strings act as stop
+# triggers for the given model family. Add a new entry to support another
+# model type. Mirrors the MODES table in base.js.
+#
+# Fields:
+#   end_token:            wire-protocol end-of-turn marker returned by load_config.
+#   stop_tokens:          hard stop strings appended to user-supplied stopAt.
+#   chat_bos:             prefix prepended once at the start of a chat prompt.
+#   format_chat_message:  callable(role, content) -> str, serializes one msg.
+#   chat_assistant_header: opens the trailing assistant turn for chat.
+#   analysis_prefix:      callable(system, user_trail) -> str, opens the user
+#                         turn for analysis (left open for a question).
+#   analysis_to_question: callable(analysis_text, question, trail) -> str,
+#                         closes the analysis user turn, appends the question,
+#                         opens the assistant turn.
+
+def _mistral_chat_msg(role: str, content: str) -> str:
+    if role == "system":
+        return f"[SYSTEM_PROMPT] {content}[/SYSTEM_PROMPT][INST]"
+    return f"\n\n{content}"
+
+
+def _gemma_chat_msg(role: str, content: str) -> str:
+    if role == "system":
+        return f"<start_of_turn>user\n{content}<end_of_turn>\n"
+    r = "model" if role == "assistant" else "user"
+    return f"<start_of_turn>{r}\n{content}<end_of_turn>\n"
+
+
+def _deepseek_chat_msg(role: str, content: str) -> str:
+    if role == "system":
+        return content
+    if role == "user":
+        return f"<｜User｜>{content}"
+    return f"<｜Assistant｜>{content}<｜end▁of▁sentence｜>"
+
+
+def _alpaca_chat_msg(role: str, content: str) -> str:
+    if role == "system":
+        return f"{content}\n\n"
+    if role == "user":
+        return f"### Instruction:\n{content}\n\n"
+    return f"### Response:\n{content}\n\n"
+
+
+MODES: dict[str, dict[str, Any]] = {
+    "mistral": {
+        "end_token": "</s>",
+        "stop_tokens": ["</s>", "[INST]"],
+        "chat_bos": "<s>",
+        "format_chat_message": _mistral_chat_msg,
+        "chat_assistant_header": "[/INST]\n\n",
+        "analysis_prefix": lambda system, user_trail:
+            f"<s>[SYSTEM_PROMPT] {system}[/SYSTEM_PROMPT][INST] {user_trail}",
+        "analysis_to_question": lambda analysis_text, question, trail:
+            analysis_text + "\n\n" + question + "\n[/INST]\n\n" + (trail or ""),
+    },
+    "llama3": {
+        "end_token": "<|eot_id|>",
+        "stop_tokens": ["<|eot_id|>", "<|start_header_id|>"],
+        "chat_bos": "",
+        "format_chat_message": lambda role, content:
+            f"<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id>",
+        "chat_assistant_header": "\n<|start_header_id|>assistant<|end_header_id|>\n\n",
+        "analysis_prefix": lambda system, user_trail: (
+            f"<|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id>"
+            f"<|start_header_id|>user<|end_header_id|>\n\n{user_trail}"
+        ),
+        "analysis_to_question": lambda analysis_text, question, trail:
+            analysis_text + "\n" + question
+            + "\n<|start_header_id|>assistant<|end_header_id|>\n\n"
+            + (trail or ""),
+    },
+    # Qwen, Hermes, Yi, generic ChatML
+    "chatml": {
+        "end_token": "<|im_end|>",
+        "stop_tokens": ["<|im_end|>", "<|im_start|>"],
+        "chat_bos": "",
+        "format_chat_message": lambda role, content:
+            f"<|im_start|>{role}\n{content}<|im_end|>\n",
+        "chat_assistant_header": "<|im_start|>assistant\n",
+        "analysis_prefix": lambda system, user_trail:
+            f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{user_trail}",
+        "analysis_to_question": lambda analysis_text, question, trail:
+            analysis_text + "\n\n" + question
+            + "<|im_end|>\n<|im_start|>assistant\n"
+            + (trail or ""),
+    },
+    # Google Gemma / Gemma2 (no dedicated system role: merged into user turn)
+    "gemma": {
+        "end_token": "<end_of_turn>",
+        "stop_tokens": ["<end_of_turn>", "<start_of_turn>"],
+        "chat_bos": "<bos>",
+        "format_chat_message": _gemma_chat_msg,
+        "chat_assistant_header": "<start_of_turn>model\n",
+        "analysis_prefix": lambda system, user_trail:
+            f"<bos><start_of_turn>user\n{system}\n\n{user_trail}",
+        "analysis_to_question": lambda analysis_text, question, trail:
+            analysis_text + "\n\n" + question
+            + "<end_of_turn>\n<start_of_turn>model\n"
+            + (trail or ""),
+    },
+    # Microsoft Phi-3 / Phi-4
+    "phi": {
+        "end_token": "<|end|>",
+        "stop_tokens": ["<|end|>", "<|user|>", "<|system|>"],
+        "chat_bos": "",
+        "format_chat_message": lambda role, content:
+            f"<|{role}|>\n{content}<|end|>\n",
+        "chat_assistant_header": "<|assistant|>\n",
+        "analysis_prefix": lambda system, user_trail:
+            f"<|system|>\n{system}<|end|>\n<|user|>\n{user_trail}",
+        "analysis_to_question": lambda analysis_text, question, trail:
+            analysis_text + "\n\n" + question
+            + "<|end|>\n<|assistant|>\n"
+            + (trail or ""),
+    },
+    # DeepSeek V2 / V3 / R1 style
+    "deepseek": {
+        "end_token": "<｜end▁of▁sentence｜>",
+        "stop_tokens": ["<｜end▁of▁sentence｜>", "<｜User｜>"],
+        "chat_bos": "<｜begin▁of▁sentence｜>",
+        "format_chat_message": _deepseek_chat_msg,
+        "chat_assistant_header": "<｜Assistant｜>",
+        "analysis_prefix": lambda system, user_trail:
+            f"<｜begin▁of▁sentence｜>{system}<｜User｜>{user_trail}",
+        "analysis_to_question": lambda analysis_text, question, trail:
+            analysis_text + "\n\n" + question
+            + "<｜Assistant｜>"
+            + (trail or ""),
+    },
+    # Classic Alpaca instruction format
+    "alpaca": {
+        "end_token": "</s>",
+        "stop_tokens": ["</s>", "### Instruction:"],
+        "chat_bos": "",
+        "format_chat_message": _alpaca_chat_msg,
+        "chat_assistant_header": "### Response:\n",
+        "analysis_prefix": lambda system, user_trail:
+            f"{system}\n\n### Instruction:\n{user_trail}",
+        "analysis_to_question": lambda analysis_text, question, trail:
+            analysis_text + "\n\n" + question
+            + "\n\n### Response:\n"
+            + (trail or ""),
+    },
+}
+
+DEFAULT_MODE = "llama3"
+
+
+def _get_mode(config: dict) -> dict:
+    name = config.get("mode") or DEFAULT_MODE
+    mode = MODES.get(name)
+    if mode is None:
+        raise ValueError(
+            f"Unsupported mode '{name}'. Supported modes: {', '.join(MODES.keys())}"
+        )
+    return mode
+
 
 def get_num_gpus():
     # Try reading environment variable first
@@ -256,8 +419,10 @@ def load_config(config_path: str, model_path_override: str | None = None) -> str
     if (CONFIG.get("tokenizerPath") is not None) and not isinstance(CONFIG["tokenizerPath"], str):
         raise ValueError("Invalid config: tokenizerPath must be a string if provided")
     
-    if (CONFIG.get("mode") is not None) and CONFIG["mode"] not in ("mistral", "llama3"):
-        raise ValueError("Invalid config: mode must be 'mistral' or 'llama3' if provided")
+    if (CONFIG.get("mode") is not None) and CONFIG["mode"] not in MODES:
+        raise ValueError(
+            f"Invalid config: mode must be one of {', '.join(MODES.keys())} if provided"
+        )
     
     if not isinstance(CONFIG.get("enforceEager"), bool):
         raise ValueError("Invalid config: enforceEager must be a boolean")
@@ -287,21 +452,14 @@ def load_config(config_path: str, model_path_override: str | None = None) -> str
 
         load_model(model_full_path, tokenizer_path=tokenizer_path, enforce_eager=CONFIG.get("enforceEager", True))
 
-    if CONFIG.get("mode") == "mistral":
-        return {"end_token": "</s>"}
-    else:
-        return {"end_token": "<|eot_id|>"}
+    return {"end_token": _get_mode(CONFIG)["end_token"]}
 
 
 # ── Sampling-params builder helpers ───────────────────────────────────────
 
 def _build_stop_tokens(config: dict, extra_stops: list[str] | None = None) -> list[str]:
     """Return the list of stop strings depending on chat-template mode."""
-    mode = config.get("mode")
-    if mode == "mistral":
-        stops = ["</s>", "[INST]"]
-    else:
-        stops = ["<|eot_id|>", "<|start_header_id|>"]
+    stops = list(_get_mode(config)["stop_tokens"])
     if extra_stops:
         stops.extend(extra_stops)
     return stops
@@ -357,47 +515,19 @@ def _make_sampling_params(
 # ── Prompt formatting ─────────────────────────────────────────────────────
 
 def _format_analysis_prompt(config: dict, system: str, user_trail: str) -> str:
-    if config.get("mode") == "mistral":
-        return f"<s>[SYSTEM_PROMPT] {system}[/SYSTEM_PROMPT][INST] {user_trail}"
-    else:
-        return (
-            f"<|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id>"
-            f"<|start_header_id|>user<|end_header_id|>\n\n{user_trail}"
-        )
+    return _get_mode(config)["analysis_prefix"](system, user_trail)
 
 
 def _format_question_prompt(config: dict, analysis_text: str, question: str, trail: str | None) -> str:
-    if config.get("mode") == "mistral":
-        prompt = analysis_text + "\n\n" + question + "\n[/INST]\n\n" + (trail or "")
-    else:
-        prompt = (
-            analysis_text + "\n" + question
-            + "\n<|start_header_id|>assistant<|end_header_id|>\n\n"
-            + (trail or "")
-        )
-    return prompt
+    return _get_mode(config)["analysis_to_question"](analysis_text, question, trail)
 
 
 def _format_chat_prompt(config: dict, messages: list[dict], trail: str | None) -> str:
-    prompt = ""
-    if config.get("mode") == "mistral":
-        prompt += "<s>"
+    mode = _get_mode(config)
+    prompt = mode["chat_bos"]
     for msg in messages:
-        role = msg["role"]
-        content = msg["content"]
-        if config.get("mode") == "mistral":
-            if role == "system":
-                prompt += f"[SYSTEM_PROMPT] {content}[/SYSTEM_PROMPT][INST]"
-            else:
-                prompt += "\n\n" + content
-        else:
-            prompt += f"<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id>"
-
-    if config.get("mode") == "mistral":
-        prompt += "[/INST]\n\n"
-    else:
-        prompt += "\n<|start_header_id|>assistant<|end_header_id|>\n\n"
-
+        prompt += mode["format_chat_message"](msg["role"], msg["content"])
+    prompt += mode["chat_assistant_header"]
     if trail:
         prompt += trail
     return prompt
