@@ -2,7 +2,7 @@
   "name": "local-server",
   "version": "1.0.0",
   "description": "",
-  "license": "ISC",
+  "license": "AGPL-3.0",
   "author": "",
   "type": "module",
   "main": "local-llama.js",
