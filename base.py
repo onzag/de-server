@@ -109,29 +109,6 @@ def _mistral_chat_msg(role: str, content: str) -> str:
     return f"\n\n{content}"
 
 
-def _gemma_chat_msg(role: str, content: str) -> str:
-    if role == "system":
-        return f"<start_of_turn>user\n{content}<end_of_turn>\n"
-    r = "model" if role == "assistant" else "user"
-    return f"<start_of_turn>{r}\n{content}<end_of_turn>\n"
-
-
-def _deepseek_chat_msg(role: str, content: str) -> str:
-    if role == "system":
-        return content
-    if role == "user":
-        return f"<｜User｜>{content}"
-    return f"<｜Assistant｜>{content}<｜end▁of▁sentence｜>"
-
-
-def _alpaca_chat_msg(role: str, content: str) -> str:
-    if role == "system":
-        return f"{content}\n\n"
-    if role == "user":
-        return f"### Instruction:\n{content}\n\n"
-    return f"### Response:\n{content}\n\n"
-
-
 MODES: dict[str, dict[str, Any]] = {
     "mistral": {
         "end_token": "</s>",
@@ -156,81 +133,23 @@ MODES: dict[str, dict[str, Any]] = {
             f"<|start_header_id|>user<|end_header_id|>\n\n{user_trail}"
         ),
         "analysis_to_question": lambda analysis_text, question, trail:
-            analysis_text + "\n" + question
+            analysis_text + "\n" + question + "<|eot_id|>"
             + "\n<|start_header_id|>assistant<|end_header_id|>\n\n"
             + (trail or ""),
     },
-    # Qwen, Hermes, Yi, generic ChatML
-    "chatml": {
-        "end_token": "<|im_end|>",
-        "stop_tokens": ["<|im_end|>", "<|im_start|>"],
+    "gemma4": {
+        "end_token": "<turn|>",
+        "stop_tokens": ["<turn|>"],
         "chat_bos": "",
-        "format_chat_message": lambda role, content:
-            f"<|im_start|>{role}\n{content}<|im_end|>\n",
-        "chat_assistant_header": "<|im_start|>assistant\n",
+        "format_chat_message": lambda role, content: (
+            f"<|turn>system\n{content}<turn|>\n" if role == "system"
+            else f"<|turn>{'model' if role == 'assistant' else 'user'}\n{content}<turn|>\n"
+        ),
+        "chat_assistant_header": "<|turn>model\n",
         "analysis_prefix": lambda system, user_trail:
-            f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{user_trail}",
+            f"<|turn>system\n{system}<turn|>\n<|turn>user\n{user_trail}",
         "analysis_to_question": lambda analysis_text, question, trail:
-            analysis_text + "\n\n" + question
-            + "<|im_end|>\n<|im_start|>assistant\n"
-            + (trail or ""),
-    },
-    # Google Gemma / Gemma2 (no dedicated system role: merged into user turn)
-    "gemma": {
-        "end_token": "<end_of_turn>",
-        "stop_tokens": ["<end_of_turn>", "<start_of_turn>"],
-        "chat_bos": "<bos>",
-        "format_chat_message": _gemma_chat_msg,
-        "chat_assistant_header": "<start_of_turn>model\n",
-        "analysis_prefix": lambda system, user_trail:
-            f"<bos><start_of_turn>user\n{system}\n\n{user_trail}",
-        "analysis_to_question": lambda analysis_text, question, trail:
-            analysis_text + "\n\n" + question
-            + "<end_of_turn>\n<start_of_turn>model\n"
-            + (trail or ""),
-    },
-    # Microsoft Phi-3 / Phi-4
-    "phi": {
-        "end_token": "<|end|>",
-        "stop_tokens": ["<|end|>", "<|user|>", "<|system|>"],
-        "chat_bos": "",
-        "format_chat_message": lambda role, content:
-            f"<|{role}|>\n{content}<|end|>\n",
-        "chat_assistant_header": "<|assistant|>\n",
-        "analysis_prefix": lambda system, user_trail:
-            f"<|system|>\n{system}<|end|>\n<|user|>\n{user_trail}",
-        "analysis_to_question": lambda analysis_text, question, trail:
-            analysis_text + "\n\n" + question
-            + "<|end|>\n<|assistant|>\n"
-            + (trail or ""),
-    },
-    # DeepSeek V2 / V3 / R1 style
-    "deepseek": {
-        "end_token": "<｜end▁of▁sentence｜>",
-        "stop_tokens": ["<｜end▁of▁sentence｜>", "<｜User｜>"],
-        "chat_bos": "<｜begin▁of▁sentence｜>",
-        "format_chat_message": _deepseek_chat_msg,
-        "chat_assistant_header": "<｜Assistant｜>",
-        "analysis_prefix": lambda system, user_trail:
-            f"<｜begin▁of▁sentence｜>{system}<｜User｜>{user_trail}",
-        "analysis_to_question": lambda analysis_text, question, trail:
-            analysis_text + "\n\n" + question
-            + "<｜Assistant｜>"
-            + (trail or ""),
-    },
-    # Classic Alpaca instruction format
-    "alpaca": {
-        "end_token": "</s>",
-        "stop_tokens": ["</s>", "### Instruction:"],
-        "chat_bos": "",
-        "format_chat_message": _alpaca_chat_msg,
-        "chat_assistant_header": "### Response:\n",
-        "analysis_prefix": lambda system, user_trail:
-            f"{system}\n\n### Instruction:\n{user_trail}",
-        "analysis_to_question": lambda analysis_text, question, trail:
-            analysis_text + "\n\n" + question
-            + "\n\n### Response:\n"
-            + (trail or ""),
+            analysis_text + "\n\n" + question + "<turn|>\n<|turn>model\n" + (trail or ""),
     },
 }
 

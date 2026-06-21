@@ -110,95 +110,26 @@ export const MODES = {
         analysisPrefix: (system, userTrail) =>
             `<|start_header_id|>system<|end_header_id|>\n\n${system}<|eot_id><|start_header_id|>user<|end_header_id|>\n\n${userTrail}`,
         analysisToQuestion: (analysisText, question, trail) =>
-            analysisText + "\n" + question
+            analysisText + "\n\n" + question + "\n<|eot_id>"
             + `\n<|start_header_id|>assistant<|end_header_id|>\n\n`
             + (trail || ""),
     },
-    // Qwen, Hermes, Yi, generic ChatML
-    chatml: {
-        endToken: "<|im_end|>",
-        stopTokens: ["<|im_end|>", "<|im_start|>"],
+    gemma4: {
+        endToken: "<turn|>",
+        stopTokens: ["<turn|>"],
         chatBos: "",
-        formatChatMessage: (role, content) =>
-            `<|im_start|>${role}\n${content}<|im_end|>\n`,
-        chatAssistantHeader: "<|im_start|>assistant\n",
-        analysisPrefix: (system, userTrail) =>
-            `<|im_start|>system\n${system}<|im_end|>\n<|im_start|>user\n${userTrail}`,
-        analysisToQuestion: (analysisText, question, trail) =>
-            analysisText + "\n\n" + question
-            + "<|im_end|>\n<|im_start|>assistant\n"
-            + (trail || ""),
-    },
-    // Google Gemma / Gemma2 (no dedicated system role: merged into first user turn)
-    gemma: {
-        endToken: "<end_of_turn>",
-        stopTokens: ["<end_of_turn>", "<start_of_turn>"],
-        chatBos: "<bos>",
         formatChatMessage: (role, content) => {
             if (role === "system") {
-                return `<start_of_turn>user\n${content}<end_of_turn>\n`;
+                return `<|turn>system\n${content}<turn|>\n`;
             }
             const r = role === "assistant" ? "model" : "user";
-            return `<start_of_turn>${r}\n${content}<end_of_turn>\n`;
+            return `<|turn>${r}\n${content}<turn|>\n`;
         },
-        chatAssistantHeader: "<start_of_turn>model\n",
+        chatAssistantHeader: "<|turn>model\n",
         analysisPrefix: (system, userTrail) =>
-            `<bos><start_of_turn>user\n${system}\n\n${userTrail}`,
+            `<|turn>system\n${system}<turn|>\n<|turn>user\n${userTrail}`,
         analysisToQuestion: (analysisText, question, trail) =>
-            analysisText + "\n\n" + question
-            + "<end_of_turn>\n<start_of_turn>model\n"
-            + (trail || ""),
-    },
-    // Microsoft Phi-3 / Phi-4
-    phi: {
-        endToken: "<|end|>",
-        stopTokens: ["<|end|>", "<|user|>", "<|system|>"],
-        chatBos: "",
-        formatChatMessage: (role, content) =>
-            `<|${role}|>\n${content}<|end|>\n`,
-        chatAssistantHeader: "<|assistant|>\n",
-        analysisPrefix: (system, userTrail) =>
-            `<|system|>\n${system}<|end|>\n<|user|>\n${userTrail}`,
-        analysisToQuestion: (analysisText, question, trail) =>
-            analysisText + "\n\n" + question
-            + "<|end|>\n<|assistant|>\n"
-            + (trail || ""),
-    },
-    // DeepSeek V2 / V3 / R1 style
-    deepseek: {
-        endToken: "<｜end▁of▁sentence｜>",
-        stopTokens: ["<｜end▁of▁sentence｜>", "<｜User｜>"],
-        chatBos: "<｜begin▁of▁sentence｜>",
-        formatChatMessage: (role, content) => {
-            if (role === "system") return content;
-            if (role === "user") return `<｜User｜>${content}`;
-            return `<｜Assistant｜>${content}<｜end▁of▁sentence｜>`;
-        },
-        chatAssistantHeader: "<｜Assistant｜>",
-        analysisPrefix: (system, userTrail) =>
-            `<｜begin▁of▁sentence｜>${system}<｜User｜>${userTrail}`,
-        analysisToQuestion: (analysisText, question, trail) =>
-            analysisText + "\n\n" + question
-            + "<｜Assistant｜>"
-            + (trail || ""),
-    },
-    // Classic Alpaca instruction format
-    alpaca: {
-        endToken: "</s>",
-        stopTokens: ["</s>", "### Instruction:"],
-        chatBos: "",
-        formatChatMessage: (role, content) => {
-            if (role === "system") return `${content}\n\n`;
-            if (role === "user") return `### Instruction:\n${content}\n\n`;
-            return `### Response:\n${content}\n\n`;
-        },
-        chatAssistantHeader: "### Response:\n",
-        analysisPrefix: (system, userTrail) =>
-            `${system}\n\n### Instruction:\n${userTrail}`,
-        analysisToQuestion: (analysisText, question, trail) =>
-            analysisText + "\n\n" + question
-            + "\n\n### Response:\n"
-            + (trail || ""),
+            analysisText + "\n\n" + question + "<turn|>\n<|turn>model\n" + (trail || ""),
     },
 };
 
