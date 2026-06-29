@@ -47,6 +47,7 @@ The config file controls which model is loaded and how text is generated. Both `
 | `mode` | string | yes | Chat template to use. Must be one of: `mistral`, `llama3`, `chatml`, `gemma`, `phi`, `deepseek`, `alpaca`. Pick the one that matches your model family. |
 | `enforceEager` | boolean | Python only | Set `false` for faster inference (CUDA graphs), `true` for a faster cold start. |
 | `tokenizerPath` | string | no | Path to a pre-saved HuggingFace tokenizer directory. Only needed for the Python server when loading a GGUF file (vLLM cannot extract the tokenizer from GGUF directly). Run `save-tokenizer.py` to generate this. |
+| `supportedLanguages` | array | no | List of supported languages for the model. |
 
 ### `standard` — roleplay / story generation
 
@@ -85,6 +86,7 @@ Used when an internal agent is running inference to extract structured data from
 {
     "modelPath": "./models/Mistral-7B-Instruct-v0.3-Q8_0.gguf",
     "mode": "mistral",
+    "supportedLanguages": ["en"],
     "standard": {
         "temperature": 1.0,
         "dynamicTemperature": [0.8, 1.05],
@@ -113,6 +115,7 @@ Used when an internal agent is running inference to extract structured data from
 ```json
 {
     "modelPath": "./models/Meta-Llama-3-70B-Instruct",
+    "supportedLanguages": ["en"],
     "mode": "llama3",
     "enforceEager": false,
     "tokenizerPath": "./models/tokenizer/llama3",
@@ -136,6 +139,7 @@ Used when an internal agent is running inference to extract structured data from
 {
     "modelPath": "./models/Qwen2.5-72B-Instruct",
     "mode": "chatml",
+    "supportedLanguages": ["en"],
     "enforceEager": false,
     "standard": {
         "temperature": 0.9,
@@ -206,6 +210,7 @@ Open the generated config file and point `modelPath` at the specific GGUF file y
 {
     "modelPath": "./models/mistral-7b-instruct-v0.3.Q8_0.gguf",
     "mode": "mistral",
+    "supportedLanguages": ["en"],
     "standard": {
         "temperature": 1.0,
         "dynamicTemperature": [0.8, 1.05],

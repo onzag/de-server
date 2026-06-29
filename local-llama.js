@@ -21,7 +21,9 @@ if (argv.length < 1) {
     process.exit(1);
 }
 
-const END_TOKEN = (await loadConfig(argv[0])).endToken;
+const LOADED_CONFIG_INFO = await loadConfig(argv[0]);
+const END_TOKEN = LOADED_CONFIG_INFO.endToken;
+const SUPPORTED_LANGUAGES = LOADED_CONFIG_INFO.supportedLanguages;
 
 let expectedSecret;
 if (!DEV) {
@@ -145,6 +147,7 @@ server.on("request", (req, res) => {
         CONFIG_PATH: escapeHtml(ARG_CONFIG_PATH || "(none)"),
         CONFIG_MODE: escapeHtml(process.env.CONFIG_MODE || "(see config file)"),
         END_TOKEN: escapeHtml(END_TOKEN || ""),
+        SUPPORTED_LANGUAGES: escapeHtml(SUPPORTED_LANGUAGES.join(", ") || "(none)"),
         CONTEXT_WINDOW: String(CONTEXT_WINDOW_SIZE),
         GPU: escapeHtml(process.env.GPU || "auto"),
         UPTIME: formatUptime(Date.now() - SERVER_START_TIME),
@@ -173,6 +176,7 @@ wss.on('connection', (ws) => {
         context_window_size: CONTEXT_WINDOW_SIZE,
         supports_parallel_requests: false,
         end_token: END_TOKEN,
+        supported_languages: SUPPORTED_LANGUAGES,
     }));
 
     ws.on('message', async (message) => {

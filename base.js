@@ -274,7 +274,7 @@ export async function loadConfig(configPath) {
         await loadModel(modelFullPath);
     }
 
-    return { endToken: getMode(CONFIG.mode).endToken };
+    return { endToken: getMode(CONFIG.mode).endToken, supportedLanguages: CONFIG.supportedLanguages || [] };
 }
 
 /**

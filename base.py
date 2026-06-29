@@ -165,6 +165,14 @@ def _get_mode(config: dict) -> dict:
         )
     return mode
 
+def _get_supported_languages(config: dict) -> list[str]:
+    langs = config.get("supportedLanguages")
+    if langs is None:
+        return []
+    if not isinstance(langs, list) or any(not isinstance(lang, str) for lang in langs):
+        raise ValueError("Invalid config: supportedLanguages must be a list of strings")
+    return langs
+
 
 def get_num_gpus():
     # Try reading environment variable first
@@ -371,7 +379,7 @@ def load_config(config_path: str, model_path_override: str | None = None) -> str
 
         load_model(model_full_path, tokenizer_path=tokenizer_path, enforce_eager=CONFIG.get("enforceEager", True))
 
-    return {"end_token": _get_mode(CONFIG)["end_token"]}
+    return {"end_token": _get_mode(CONFIG)["end_token"], "supported_languages": _get_supported_languages(CONFIG)}
 
 
 # ── Sampling-params builder helpers ───────────────────────────────────────

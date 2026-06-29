@@ -27,6 +27,7 @@ HOST = '0.0.0.0'
 DEV = os.getenv("DEV", "0") == "1"
 
 END_TOKEN = None  # This will be set after loading the config
+SUPPORTED_LANGUAGES = []  # This will be set after loading the config
 
 # ── Static info page ──────────────────────────────────────────────────────
 # Load the HTML template once at startup. Visiting https://host:8765/ in a
@@ -81,6 +82,7 @@ def _render_index_html() -> str:
         "CONFIG_PATH": _html_escape(ARG_CONFIG_PATH or "(none)"),
         "CONFIG_MODE": _html_escape(os.environ.get("CONFIG_MODE", "(see config file)")),
         "END_TOKEN": _html_escape(END_TOKEN or ""),
+        "SUPPORTED_LANGUAGES": _html_escape(", ".join(SUPPORTED_LANGUAGES) or "(none)"),
         "CONTEXT_WINDOW": str(getattr(base, "CONTEXT_WINDOW_SIZE", "?")),
         "GPU": _html_escape(os.environ.get("GPU", "auto")),
         "UPTIME": _format_uptime(time.time() - SERVER_START_TIME),
@@ -100,7 +102,8 @@ async def handle_client(websocket):
         "message": "Model is ready",
         "context_window_size": base.CONTEXT_WINDOW_SIZE,
         "supports_parallel_requests": True,
-        "end_token": END_TOKEN
+        "end_token": END_TOKEN,
+        "supported_languages": SUPPORTED_LANGUAGES
     }))
 
     loop = asyncio.get_event_loop()
@@ -278,5 +281,7 @@ if __name__ == "__main__":
 
     print("DEBUG mode:", base.DEBUG)
     print("DEV mode:", DEV)
-    END_TOKEN = base.load_config(argv[0])["end_token"]  # Load the config and set the END_TOKEN based on the model mode
+    loaded_config = base.load_config(argv[0])
+    END_TOKEN = loaded_config["end_token"]  # Load the config and set the END_TOKEN based on the model mode
+    SUPPORTED_LANGUAGES = loaded_config["supported_languages"]
     asyncio.run(main())
