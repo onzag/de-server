@@ -129,7 +129,7 @@ export const MODES = {
         analysisPrefix: (system, userTrail) =>
             `<|turn>system\n${system}<turn|>\n<|turn>user\n${userTrail}`,
         analysisToQuestion: (analysisText, question, trail) =>
-            analysisText + "\n\n" + question + "<turn|>\n<|turn>model\n" + (trail || ""),
+            analysisText + "\n" + question + "<turn|>\n<|turn>model\n" + (trail || ""),
     },
 };
 
