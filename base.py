@@ -139,7 +139,7 @@ MODES: dict[str, dict[str, Any]] = {
     },
     "gemma4": {
         "end_token": "<turn|>",
-        "stop_tokens": ["<turn|>"],
+        "stop_tokens": ["<turn|>", "<channel|>", "<|turn|>", "<|channel|>", "<|turn>", "<|channel>"],
         "chat_bos": "",
         "format_chat_message": lambda role, content: (
             f"<|turn>system\n{content}<turn|>\n" if role == "system"
