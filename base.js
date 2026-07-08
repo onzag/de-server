@@ -29,7 +29,7 @@
  *       "temperature": 1.0,
  *       "maxTokens": 512,
  *       // dynamic temperature range, if given it will vary temperature between these values
- *       "dynamicTemperature": [0.8, 1.05],
+ *       "temperatureRange": [0.8, 1.05],
  *       // minimum probability for dry run detection
  *       "minP": 0.025,
  *       // dry sampler settings

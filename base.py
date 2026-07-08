@@ -30,7 +30,7 @@ JSON File settings example:
     "standard": {
         "temperature": 1.0,
         "maxTokens": 512,
-        "dynamicTemperature": [0.8, 1.05],
+        "temperatureRange": [0.8, 1.05],
         "minP": 0.025,
         "dry": {
             "multiplier": 0.8,
