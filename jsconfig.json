@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "checkJs": true,
+    "strict": true,
+    "moduleResolution": "node",
+    "target": "es2022",
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
+  },
+  "typeAcquisition": {"enable": false},
+  "include": ["**/*.js", "**/*.d.ts"],
+  "exclude": ["node_modules", "pyenv"]
+}

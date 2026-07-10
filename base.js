@@ -53,8 +53,10 @@
  * }
  */
 
+// @ts-ignore
 import fs from 'fs';
 const { LlamaCompletion, getLlama } = await import('node-llama-cpp');
+// @ts-ignore
 import path from 'path';
 
 /**
@@ -176,6 +178,7 @@ function escapeRegExp(string) {
  *    mode: keyof typeof MODES;
  *    standard: {temperature: number; temperatureRange?: [number, number]; topP?: number; minP?: number; repeatPenalty?: number; frequencyPenalty?: number; presencePenalty?: number; maxTokens: number;},
  *    analyze: {temperature: number; temperatureRange?: [number, number]; topP?: number; minP?: number; repeatPenalty?: number; frequencyPenalty?: number; presencePenalty?: number; maxTokens: number;},
+ *    supportedLanguages?: string[];
  * }}
  */
 let CONFIG = /** @type {any} */ (null);
@@ -242,7 +245,7 @@ export let CONTROLLER = null;
 
 /**
  * @param {string} configPath
- * @return {Promise<{endToken: string}>} The end token to use for the current model, based on the config mode
+ * @return {Promise<{endToken: string, supportedLanguages: string[]}>} The end token to use for the current model, based on the config mode
  */
 export async function loadConfig(configPath) {
     console.log("Loading config:", configPath);
@@ -309,6 +312,7 @@ async function loadModel(model) {
     console.log('Model loaded successfully');
 }
 
+// @ts-ignore
 const DEBUG = process.env.DEBUG === "1";
 
 console.log("DEBUG mode:", DEBUG);
@@ -375,8 +379,10 @@ export async function prepareAnalysis(data, onDone, onError) {
  * stopAfter: Array<string>;
  * maxParagraphs: number;
  * maxCharacters: number;
+ * maxSafetyCharacters: number;
  * trail: string | null;
  * grammar: string | null;
+ * gear: string;
  * }} data
  * @param {(v: string) => void} onAnswer 
  * @param {(err: Error) => void} onError 
@@ -413,6 +419,10 @@ export async function runQuestion(data, onAnswer, onError) {
 
     if (typeof data.maxCharacters !== "number" || isNaN(data.maxCharacters) || data.maxCharacters < 0) {
         throw new Error("Invalid maxCharacters format");
+    }
+
+    if (typeof data.maxSafetyCharacters !== "number" || isNaN(data.maxSafetyCharacters) || data.maxSafetyCharacters < 0) {
+        throw new Error("Invalid maxSafetyCharacters format");
     }
 
     if (data.trail !== null && typeof data.trail !== "string") {
@@ -486,6 +496,7 @@ export async function runQuestion(data, onAnswer, onError) {
 
                     if (DEBUG) {
                         // use this weird character to denote token boundaries
+                        // @ts-ignore
                         process.stdout.write(text + "§");
                     }
 
@@ -580,10 +591,34 @@ export async function runQuestion(data, onAnswer, onError) {
     CONTROLLER = null;
 }
 
+// TODO implement wordRejection, where rejectedWordsInNarration is expected to be "you" "your" etc... and delimiter - or emdash.
 
 /**
- * 
- * @param {{messages: Array<{role: string, content: string}>, stopAt: Array<string>, stopAfter: Array<string>, maxParagraphs: number, maxCharacters: number, trail: string | null, gear: string}} data 
+ * @typedef {Object} WordRejectionSettings
+ * @property {Array<string>} rejectedWordsInNarration - The words to reject in narration.
+ * @property {string | null} postRejectedWordInNarrationGrammar - The grammar to use after a rejected word in narration.
+ * @property {Array<string>} rejectedWordsInDialogue - The words to reject in dialogue.
+ * @property {string | null} postRejectedWordInDialogueGrammar - The grammar to use after a rejected word in dialogue.
+ * @property {Array<string>} delimiters - The delimiters to use for splitting the text into words.
+ * @property {boolean} startsInDialogue - Whether the text starts in dialogue or not.
+ */
+
+/**
+ * @typedef {Object} GenerationData
+ * @property {Array<{role: string, content: string}>} messages - The chat messages to generate a completion for.
+ * @property {Array<string>} stopAt - The strings to stop generation at.
+ * @property {Array<string>} stopAfter - The strings to stop generation after.
+ * @property {number} maxParagraphs - The maximum number of paragraphs to generate.
+ * @property {number} maxCharacters - The maximum number of characters to generate.
+ * @property {number} maxSafetyCharacters - The maximum number of characters to generate before stopping for safety.
+ * @property {string | null} trail - The trailing text to append to the prompt.
+ * @property {string} gear - The gear to use for generation (standard or analyze).
+ * @property {string | null} grammar - The grammar to use for generation.
+ * @property {WordRejectionSettings} wordRejection - The word rejection settings.
+ */
+
+/**
+ * @param {GenerationData} data 
  * @param {(text: string) => void} onToken 
  * @param {() => void} onDone 
  * @param {(error: Error) => void} onError 
@@ -619,6 +654,10 @@ export async function generateCompletion(data, onToken, onDone, onError) {
         throw new Error("Invalid maxCharacters format");
     }
 
+    if (typeof data.maxSafetyCharacters !== "number" || isNaN(data.maxSafetyCharacters) || data.maxSafetyCharacters < 0) {
+        throw new Error("Invalid maxSafetyCharacters format");
+    }
+
     if (data.trail !== null && typeof data.trail !== "string") {
         throw new Error("Invalid trail format");
     }
@@ -652,11 +691,221 @@ export async function generateCompletion(data, onToken, onDone, onError) {
         prompt += data.trail;
     }
 
-    const grammar = data.grammar ? await LLAMA.createGrammar({
-        grammar: data.grammar,
-    }) : undefined;
+    const basicConfig = {
+        temperature: CONFIG.standard.temperature,
+        topP: CONFIG.standard.topP,
+        minP: CONFIG.standard.minP,
+        repeatPenalty: {
+            penalty: CONFIG.standard.repeatPenalty,
+            frequencyPenalty: CONFIG.standard.frequencyPenalty,
+            presencePenalty: CONFIG.standard.presencePenalty,
+        },
+        customStopTriggers: modeImpl.stopTokens.concat(data.stopAt || []),
+        maxTokens: CONFIG.standard.maxTokens || 512,
+    }
+    if (CONFIG.standard.temperatureRange) {
+        basicConfig.temperature = getDynamicTemperature(CONFIG.standard.temperatureRange[0], CONFIG.standard.temperatureRange[1]);
+    }
+    // TODO add XTC and dry sampling options from config
+    if (typeof data.maxParagraphs === "number" && DEBUG) {
+        console.log("Max paragraphs limit set to:", data.maxParagraphs);
+    }
+    if (typeof data.maxCharacters === "number" && DEBUG) {
+        console.log("Max characters limit set to:", data.maxCharacters);
+    }
 
-    let context = null
+    return await runPrompt(prompt, data, basicConfig, onToken, onDone, onError);
+}
+
+/**
+ * TODO implement bad words in python version too
+ * 
+ * @param {string} prompt 
+ * @param {GenerationData} data 
+ * @param {*} basicConfig
+ * @param {(text: string) => void} onToken 
+ * @param {() => void} onDone 
+ * @param {(error: Error) => void} onError 
+ */
+async function runPrompt(
+    prompt,
+    data,
+    basicConfig,
+    onToken,
+    onDone,
+    onError,
+) {
+    let bufferedText = "";
+    let producedText = "";
+    const BUFFERED_SIZE = 20; // buffer 20 characters
+
+    let inDialoge = data.wordRejection ? data.wordRejection.startsInDialogue : false;
+
+    const grammar = data.grammar ? await LLAMA.createGrammar({ grammar: data.grammar }) : undefined;
+
+    const regexStopAfter = data.stopAfter.map(s => new RegExp(`(^|[.,;])\\s*${escapeRegExp(s)}\\s*([.,;]|$)`, 'i'));
+
+    /**
+     * @type {{
+     *    prompt: string,
+     *    data: GenerationData,
+     * } | null}
+     */
+    let failedDueToBadWordReprocessArgs = null;
+
+    /**
+     * @param {string} text 
+     */
+    const increaseBufferedText = (text) => {
+        bufferedText += text;
+        producedText += text;
+
+        if (DEBUG) {
+            // use this weird character to denote token boundaries
+            // @ts-ignore
+            process.stdout.write(text + "§");
+        }
+
+        if (data.wordRejection) {
+            for (const delimiter of data.wordRejection.delimiters) {
+                while (bufferedText.includes(delimiter)) {
+                    const firstPart = bufferedText.split(delimiter)[0];
+                    const secondPart = bufferedText.slice(firstPart.length + delimiter.length);
+                    inDialoge = !inDialoge;
+                    bufferedText = secondPart;
+                    onToken(firstPart + delimiter);
+                }
+            }
+        }
+
+        // For the non prototype this can be optimized better but for now it's fine
+        // count paragraphs
+        let paragraphCount = 0;
+
+        if (typeof data.maxParagraphs === "number" && data.maxParagraphs > 0) {
+            for (let i = 0; i < producedText.length; i++) {
+                if (producedText[i] === '\n' && producedText[i + 1] === '\n') {
+                    paragraphCount += 1;
+                }
+                //console.log("Current paragraph count:", paragraphCount);
+
+                // this should hit exactly at paragraph end
+                if (paragraphCount >= data.maxParagraphs) {
+                    //console.log("Max paragraphs reached:", paragraphCount, "stopping completion early.");
+                    // I think newlines are whole tokens, but just in case the text contains some text too
+                    const potentialPartBeforeNew = bufferedText.split("\n")[0]
+                    if (potentialPartBeforeNew.length > 0) {
+                        onToken(potentialPartBeforeNew);
+                    }
+                    console.log("\nAborting completion due to max paragraphs limit.");
+                    CONTROLLER?.abort();
+                    CONTROLLER = null;
+                    return;
+                }
+            }
+        }
+
+        if (typeof data.maxCharacters === "number" && data.maxCharacters > 0) {
+            const characterCount = producedText.length;
+
+            //console.log("Current character count:", characterCount);
+
+            if (characterCount >= data.maxCharacters) {
+                //console.log("Trying to abort but no paragraph end found yet.");
+                // let's find if our text is finally finishing a paragraph
+                if (text.indexOf('\n') !== -1) {
+                    //console.log("Max characters reached:", characterCount, "stopping completion at this paragraph end.");
+                    const potentialPartBeforeNew = bufferedText.split("\n")[0]
+                    if (potentialPartBeforeNew.length > 0) {
+                        onToken(potentialPartBeforeNew);
+                    }
+                    console.log("\nAborting completion due to max characters limit.");
+                    CONTROLLER?.abort();
+                    CONTROLLER = null;
+                    return;
+                }
+            }
+        }
+        if (typeof data.maxSafetyCharacters === "number" && data.maxSafetyCharacters > 0) {
+            const characterCount = producedText.length;
+            //console.log("Current character count:", characterCount);
+
+            if (characterCount >= data.maxSafetyCharacters) {
+                console.log("\nAborting completion due to max safety characters limit.");
+                onToken(bufferedText);
+                CONTROLLER?.abort();
+                CONTROLLER = null;
+                return;
+            }
+        }
+
+        if (regexStopAfter.length > 0) {
+            for (const stopRegex of regexStopAfter) {
+                if (stopRegex.test(producedText)) {
+                    console.log("\nAborting completion due to stopAfter trigger matched:", stopRegex);
+                    CONTROLLER?.abort();
+                    CONTROLLER = null;
+                    return;
+                }
+            }
+        }
+
+        if (bufferedText.length >= BUFFERED_SIZE) {
+            // get the first n characters to make the buffered text exactly BUFFERED_SIZE
+            const toSend = bufferedText.slice(0, BUFFERED_SIZE);
+            bufferedText = bufferedText.slice(BUFFERED_SIZE);
+            onToken(toSend);
+        }
+
+        if (data.wordRejection) {
+            const forbiddenWords = inDialoge ? data.wordRejection.rejectedWordsInDialogue : data.wordRejection.rejectedWordsInNarration;
+            const postGrammar = inDialoge ? data.wordRejection.postRejectedWordInDialogueGrammar : data.wordRejection.postRejectedWordInNarrationGrammar;
+            // check using regex for words
+            for (const word of forbiddenWords) {
+                const regex = new RegExp(`\\b${escapeRegExp(word)}\\b`, 'i');
+                if (regex.test(bufferedText)) {
+                    const indexBadWordFound = bufferedText.search(regex);
+                    const textBeforeBadWord = bufferedText.slice(0, indexBadWordFound);
+
+                    onToken(textBeforeBadWord);
+
+                    const textAfterBadWord = bufferedText.slice(indexBadWordFound + word.length);
+
+                    console.log(`\nAborting completion due to forbidden word detected: ${word}`);
+                    CONTROLLER?.abort();
+                    CONTROLLER = null;
+
+                    const newData = { ...data };
+                    newData.grammar = postGrammar;
+                    if (data.maxCharacters !== 0) {
+                        newData.maxCharacters = data.maxCharacters - producedText.length + textAfterBadWord.length;
+                        if (newData.maxCharacters <= 0) {
+                            console.log("\nAborting completion due to max characters limit reached after forbidden word.");
+                            onDone();
+                            return;
+                        }
+                    }
+                    if (data.maxSafetyCharacters !== 0) {
+                        newData.maxSafetyCharacters = data.maxSafetyCharacters - producedText.length + textAfterBadWord.length;
+                    }
+                    newData.wordRejection.startsInDialogue = inDialoge;
+
+                    const producedTextWithoutTheBadWord = producedText.slice(0, producedText.length - textAfterBadWord.length);
+                    prompt += producedTextWithoutTheBadWord;
+
+                    failedDueToBadWordReprocessArgs = {
+                        prompt,
+                        data: newData,
+                    };
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    let context = null;
     let completion = null;
     CONTROLLER = new AbortController();
     try {
@@ -666,39 +915,10 @@ export async function generateCompletion(data, onToken, onDone, onError) {
             contextSequence: context.getSequence()
         });
 
-        const basicConfig = {
-            temperature: CONFIG.standard.temperature,
-            topP: CONFIG.standard.topP,
-            minP: CONFIG.standard.minP,
-            repeatPenalty: {
-                penalty: CONFIG.standard.repeatPenalty,
-                frequencyPenalty: CONFIG.standard.frequencyPenalty,
-                presencePenalty: CONFIG.standard.presencePenalty,
-            },
-            customStopTriggers: modeImpl.stopTokens.concat(data.stopAt || []),
-            maxTokens: CONFIG.standard.maxTokens || 512,
-        }
-        if (CONFIG.standard.temperatureRange) {
-            basicConfig.temperature = getDynamicTemperature(CONFIG.standard.temperatureRange[0], CONFIG.standard.temperatureRange[1]);
-        }
-        // TODO add XTC and dry sampling options from config
-        if (typeof data.maxParagraphs === "number" && DEBUG) {
-            console.log("Max paragraphs limit set to:", data.maxParagraphs);
-        }
-        if (typeof data.maxCharacters === "number" && DEBUG) {
-            console.log("Max characters limit set to:", data.maxCharacters);
-        }
-
-        let hasBegunCounting = true
-        let accumulatedText = "";
-        let accumulatedTextForCounting = "";
-
         if (DEBUG) {
             console.log("Generation config:", basicConfig);
             console.log("Prompt:", prompt);
         }
-
-        const regexStopAfter = data.stopAfter.map(s => new RegExp(`(^|[.,;])\\s*${escapeRegExp(s)}\\s*([.,;]|$)`, 'i'));
 
         await completion.generateCompletion(prompt, {
             ...basicConfig,
@@ -706,79 +926,11 @@ export async function generateCompletion(data, onToken, onDone, onError) {
             stopOnAbortSignal: true,
             grammar,
             onTextChunk(textSrc) {
+                if (failedDueToBadWordReprocessArgs) {
+                    return;
+                }
                 try {
-                    const text = textSrc;
-                    accumulatedText += text;
-                    if (DEBUG) {
-                        // use this weird character to denote token boundaries
-                        process.stdout.write(text + "§");
-                    }
-                    // Always accumulate text if we need to track limits
-                    if (hasBegunCounting) {
-                        accumulatedTextForCounting += text;
-                    }
-
-                    if (typeof data.maxParagraphs === "number" && data.maxParagraphs > 0) {
-                        // For the non prototype this can be optimized better but for now it's fine
-                        // count paragraphs
-                        let paragraphCount = 0;
-
-                        for (let i = 0; i < accumulatedTextForCounting.length; i++) {
-                            if (accumulatedTextForCounting[i] === '\n' && accumulatedTextForCounting[i + 1] === '\n') {
-                                paragraphCount += 1;
-                            }
-                            //console.log("Current paragraph count:", paragraphCount);
-
-                            // this should hit exactly at paragraph end
-                            if (paragraphCount >= data.maxParagraphs) {
-                                //console.log("Max paragraphs reached:", paragraphCount, "stopping completion early.");
-                                // I think newlines are whole tokens, but just in case the text contains some text too
-                                const potentialPartBeforeNew = text.split("\n")[0]
-                                if (potentialPartBeforeNew.length > 0) {
-                                    onToken(potentialPartBeforeNew);
-                                }
-                                console.log("\nAborting completion due to max paragraphs limit.");
-                                CONTROLLER?.abort();
-                                CONTROLLER = null;
-                                return;
-                            }
-                        }
-                    }
-                    if (typeof data.maxCharacters === "number" && data.maxCharacters > 0) {
-                        const characterCount = accumulatedText.length;
-
-                        //console.log("Current character count:", characterCount);
-
-                        if (characterCount >= data.maxCharacters) {
-                            //console.log("Trying to abort but no paragraph end found yet.");
-                            // let's find if our text is finally finishing a paragraph
-                            if (text.indexOf('\n') !== -1) {
-                                //console.log("Max characters reached:", characterCount, "stopping completion at this paragraph end.");
-                                const potentialPartBeforeNew = text.split("\n")[0]
-                                if (potentialPartBeforeNew.length > 0) {
-                                    onToken(potentialPartBeforeNew);
-                                }
-                                console.log("\nAborting completion due to max characters limit.");
-                                CONTROLLER?.abort();
-                                CONTROLLER = null;
-                                return;
-                            }
-                        }
-                    }
-
-                    onToken(text);
-
-                    if (regexStopAfter.length > 0) {
-                        for (const stopRegex of regexStopAfter) {
-                            if (stopRegex.test(accumulatedTextForCounting)) {
-                                console.log("\nAborting completion due to stopAfter trigger matched:", stopRegex);
-                                CONTROLLER?.abort();
-                                CONTROLLER = null;
-                                return;
-                            }
-                        }
-                    }
-
+                    increaseBufferedText(textSrc);
                 } catch (e) {
                     // @ts-ignore
                     console.log("\nError in onToken callback:", e.message);
@@ -798,6 +950,26 @@ export async function generateCompletion(data, onToken, onDone, onError) {
         context = null;
     }
     console.log("");
+
+    if (failedDueToBadWordReprocessArgs) {
+        CONTROLLER = null;
+        console.log("\nReprocessing due to forbidden word detected...");
+        await runPrompt(
+            // @ts-ignore typescript is wrong
+            failedDueToBadWordReprocessArgs.prompt,
+            // @ts-ignore typescript is wrong
+            failedDueToBadWordReprocessArgs.data,
+            basicConfig,
+            onToken,
+            onDone,
+            onError
+        );
+        return;
+    } else {
+        // send the last buffered text left
+        onToken(bufferedText);
+    }
+
     onDone();
     CONTROLLER = null;
 }

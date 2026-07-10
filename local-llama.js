@@ -4,20 +4,30 @@
 // this is very good for consumer grade hardware that can't run anything in parallell
 // and the model runs locally in the same machine
 
+// @ts-ignore
 import { WebSocketServer } from "ws";
 import { CONTROLLER, MODEL, MODEL_PATH, generateCompletion, prepareAnalysis, runQuestion, loadConfig } from "./base.js";
+// @ts-ignore
 import { readFileSync, writeFileSync, existsSync } from "fs";
+// @ts-ignore
 import { randomBytes } from "crypto";
+// @ts-ignore
 import { URL } from "url";
+// @ts-ignore
 import { createServer as createHttpsServer } from "https";
+// @ts-ignore
 import { createServer as createHttpServer } from "http";
 
+// @ts-ignore
 const DEV = process.env.DEV === "1";
+// @ts-ignore
 const SSL = process.env.SSL === "1";
 
+// @ts-ignore
 const argv = process.argv.slice(2);
 if (argv.length < 1) {
     console.error("Please provide a model path as the first argument.");
+    // @ts-ignore
     process.exit(1);
 }
 
@@ -43,6 +53,11 @@ console.log("DEV mode:", DEV);
 console.log("SSL mode:", SSL);
 console.log(`Starting Local LLaMA WebSocket Server, listening on ${SSL ? "wss" : "ws"}://0.0.0.0:8765`);
 
+/**
+ *
+ * @param {*} info 
+ * @returns 
+ */
 const verifyClient = (info) => {
     const url = new URL(info.req.url, `http://${info.req.headers.host}`);
     const secret = url.searchParams.get("secret");
@@ -62,7 +77,9 @@ if (SSL) {
             key: readFileSync("./key.pem"),
         });
     } catch (e) {
+        // @ts-ignore
         console.error("Failed to create SSL server:", e.message);
+        // @ts-ignore
         process.exit(1);
     }
 } else {
@@ -70,7 +87,9 @@ if (SSL) {
 }
 
 let CONTEXT_WINDOW_SIZE = 2048 * 4; // 8k context
+// @ts-ignore
 if (process.env.CONTEXT_WINDOW_SIZE) {
+    // @ts-ignore
     const envSize = parseInt(process.env.CONTEXT_WINDOW_SIZE);
     if (!isNaN(envSize) && envSize > 0) {
         CONTEXT_WINDOW_SIZE = envSize;
@@ -81,8 +100,11 @@ if (process.env.CONTEXT_WINDOW_SIZE) {
 // Load the HTML template once at startup. Visiting http(s)://host:8765/ in a
 // browser shows basic server status; this also gives users a way to manually
 // accept the self-signed certificate so subsequent wss:// connections work.
+// @ts-ignore
 import { fileURLToPath } from "url";
+// @ts-ignore
 import { dirname, join } from "path";
+// @ts-ignore
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const INDEX_HTML_TEMPLATE = readFileSync(join(__dirname, "index.html"), "utf-8");
@@ -93,6 +115,7 @@ const ARG_CONFIG_PATH = argv[0];
  * @param {Record<string, string>} replacements
  */
 function renderIndexHtml(replacements) {
+    // @ts-ignore
     return INDEX_HTML_TEMPLATE.replace(/\{\{(\w+)\}\}/g, (_, key) =>
         Object.prototype.hasOwnProperty.call(replacements, key)
             ? String(replacements[key])
@@ -117,6 +140,10 @@ function formatUptime(ms) {
     return parts.join(" ");
 }
 
+/**
+ * @param {string} str 
+ * @returns {string}
+ */
 function escapeHtml(str) {
     return String(str)
         .replace(/&/g, "&amp;")
@@ -126,6 +153,8 @@ function escapeHtml(str) {
         .replace(/'/g, "&#39;");
 }
 
+
+// @ts-ignore
 server.on("request", (req, res) => {
     // Only the root path serves the info page; everything else is 404.
     const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -145,10 +174,12 @@ server.on("request", (req, res) => {
         MODEL_LOADED: MODEL ? "yes" : "no",
         MODEL_PATH: escapeHtml(MODEL_PATH || "(none)"),
         CONFIG_PATH: escapeHtml(ARG_CONFIG_PATH || "(none)"),
+// @ts-ignore
         CONFIG_MODE: escapeHtml(process.env.CONFIG_MODE || "(see config file)"),
         END_TOKEN: escapeHtml(END_TOKEN || ""),
         SUPPORTED_LANGUAGES: escapeHtml(SUPPORTED_LANGUAGES.join(", ") || "(none)"),
         CONTEXT_WINDOW: String(CONTEXT_WINDOW_SIZE),
+// @ts-ignore
         GPU: escapeHtml(process.env.GPU || "auto"),
         UPTIME: formatUptime(Date.now() - SERVER_START_TIME),
         PROGRAM: "Node.js Local LLaMA Server",
@@ -167,6 +198,7 @@ server.listen(8765, '0.0.0.0');
  */
 let lastGenerationPromise = Promise.resolve();
 
+// @ts-ignore
 wss.on('connection', (ws) => {
     console.log('Client connected');
 
@@ -179,6 +211,7 @@ wss.on('connection', (ws) => {
         supported_languages: SUPPORTED_LANGUAGES,
     }));
 
+    // @ts-ignore
     ws.on('message', async (message) => {
         let rid = "no-rid";
         try {
