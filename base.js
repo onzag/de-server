@@ -706,7 +706,6 @@ export async function generateCompletion(data, onToken, onDone, onError) {
     if (CONFIG.standard.temperatureRange) {
         basicConfig.temperature = getDynamicTemperature(CONFIG.standard.temperatureRange[0], CONFIG.standard.temperatureRange[1]);
     }
-    // TODO add XTC and dry sampling options from config
     if (typeof data.maxParagraphs === "number" && DEBUG) {
         console.log("Max paragraphs limit set to:", data.maxParagraphs);
     }
@@ -752,6 +751,7 @@ async function runPrompt(
      * } | null}
      */
     let failedDueToBadWordReprocessArgs = null;
+    let earlyAbort = false;
 
     /**
      * @param {string} text 
@@ -800,6 +800,7 @@ async function runPrompt(
                     console.log("\nAborting completion due to max paragraphs limit.");
                     CONTROLLER?.abort();
                     CONTROLLER = null;
+                    earlyAbort = true;
                     return;
                 }
             }
@@ -822,6 +823,7 @@ async function runPrompt(
                     console.log("\nAborting completion due to max characters limit.");
                     CONTROLLER?.abort();
                     CONTROLLER = null;
+                    earlyAbort = true;
                     return;
                 }
             }
@@ -835,6 +837,7 @@ async function runPrompt(
                 onToken(bufferedText);
                 CONTROLLER?.abort();
                 CONTROLLER = null;
+                earlyAbort = true;
                 return;
             }
         }
@@ -845,6 +848,7 @@ async function runPrompt(
                     console.log("\nAborting completion due to stopAfter trigger matched:", stopRegex);
                     CONTROLLER?.abort();
                     CONTROLLER = null;
+                    earlyAbort = true;
                     return;
                 }
             }
@@ -889,6 +893,7 @@ async function runPrompt(
                         newData.maxSafetyCharacters = data.maxSafetyCharacters - producedText.length + textAfterBadWord.length;
                     }
                     newData.wordRejection.startsInDialogue = inDialoge;
+                    newData.maxParagraphs = data.maxParagraphs - paragraphCount;
 
                     const producedTextWithoutTheBadWord = producedText.slice(0, producedText.length - textAfterBadWord.length);
                     prompt += producedTextWithoutTheBadWord;
@@ -897,6 +902,7 @@ async function runPrompt(
                         prompt,
                         data: newData,
                     };
+                    earlyAbort = true;
                     return false;
                 }
             }
@@ -965,7 +971,7 @@ async function runPrompt(
             onError
         );
         return;
-    } else {
+    } else if (!earlyAbort && bufferedText.length > 0) {
         // send the last buffered text left
         onToken(bufferedText);
     }
