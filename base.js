@@ -118,7 +118,7 @@ export const MODES = {
     },
     gemma4: {
         endToken: "<turn|>",
-        stopTokens: ["<turn|>", "<channel|>", "<|turn|>", "<|channel|>", "<|turn>", "<|channel>"],
+        stopTokens: ["<turn|>", "<channel|>", "<|turn|>", "<|channel|>", "<|turn>", "</turn>", "<|channel>"],
         chatBos: "",
         formatChatMessage: (role, content) => {
             if (role === "system") {
