@@ -158,11 +158,18 @@ function getMode(mode) {
 }
 
 /**
- * @type {import('node-llama-cpp').LlamaModel}
+ * @type {{model: import('node-llama-cpp').LlamaModel | null}}
  */
-export let MODEL = /** @type {any} */ (null);
+export let MODEL = {
+    model: null,
+};
 let LLAMA = await getLlama();
-export let MODEL_PATH = "";
+/**
+ * @type {{path: string | null}}
+ */
+export let MODEL_PATH = {
+    path: null,
+};
 
 /**
  * @param {string} string 
@@ -239,9 +246,9 @@ function checkConfigValidity(config) {
 }
 
 /**
- * @type {AbortController | null}
+ * @type {{ctrl: AbortController | null}}
  */
-export let CONTROLLER = null;
+export let CONTROLLER = {ctrl: null};
 
 /**
  * @param {string} configPath
@@ -270,7 +277,7 @@ export async function loadConfig(configPath) {
         );
     }
 
-    if (MODEL_PATH !== CONFIG.modelPath) {
+    if (MODEL_PATH.path !== CONFIG.modelPath) {
         // use relative path from config file
         const baseDir = path.dirname(configPath);
         const modelFullPath = path.resolve(baseDir, CONFIG.modelPath);
@@ -284,18 +291,18 @@ export async function loadConfig(configPath) {
  * @param {string} model 
  * @returns 
  */
-async function loadModel(model) {
+export async function loadModel(model) {
     console.log("Loading model:", model);
-    if (MODEL_PATH === model && MODEL !== null) {
+    if (MODEL_PATH.path === model && MODEL.model !== null) {
         console.log('Model already loaded');
         return;
     }
 
-    if (MODEL !== null) {
+    if (MODEL.model !== null) {
         console.log('Unloading previous model');
-        await MODEL.dispose();
-        MODEL = /** @type {any} */ (null);
-        MODEL_PATH = "";
+        await MODEL.model.dispose();
+        MODEL.model = null;
+        MODEL_PATH.path = null;
     }
 
     console.log('GPU Support:', LLAMA.gpu || 'Unknown');
@@ -305,8 +312,8 @@ async function loadModel(model) {
         gpuLayers: "auto",
         defaultContextFlashAttention: true,
     });
-    MODEL = LLAMA_MODEL
-    MODEL_PATH = model;
+    MODEL.model = LLAMA_MODEL;
+    MODEL_PATH.path = model;
 
     // Create a simple HTTP server that takes a prompt and returns a response
     console.log('Model loaded successfully');
@@ -388,10 +395,10 @@ export async function prepareAnalysis(data, onDone, onError) {
  * @param {(err: Error) => void} onError 
  */
 export async function runQuestion(data, onAnswer, onError) {
-    if (CONTROLLER) {
+    if (CONTROLLER.ctrl) {
         throw new Error("Another generation is already in progress");
     }
-    if (!MODEL) {
+    if (!MODEL.model) {
         throw new Error("Model not loaded");
     }
     if (!CONFIG) {
@@ -440,13 +447,13 @@ export async function runQuestion(data, onAnswer, onError) {
     let context = null
     let completion = null;
     let answer = "";
-    CONTROLLER = new AbortController();
+    CONTROLLER.ctrl = new AbortController();
     try {
         const grammar = data.grammar ? await LLAMA.createGrammar({
             grammar: data.grammar,
         }) : undefined;
         // Create context and completion for raw text
-        context = await MODEL.createContext();
+        context = await MODEL.model.createContext();
         completion = new LlamaCompletion({
             contextSequence: context.getSequence(),
         });
@@ -486,7 +493,7 @@ export async function runQuestion(data, onAnswer, onError) {
 
         await completion.generateCompletion(prompt, {
             ...basicConfig,
-            signal: CONTROLLER.signal,
+            signal: CONTROLLER.ctrl.signal,
             stopOnAbortSignal: true,
             grammar,
             onTextChunk(textSrc) {
@@ -520,8 +527,8 @@ export async function runQuestion(data, onAnswer, onError) {
                                     answer += potentialPartBeforeNew;
                                 }
                                 console.log("\nAborting completion due to max paragraphs limit.");
-                                CONTROLLER?.abort();
-                                CONTROLLER = null;
+                                CONTROLLER.ctrl?.abort();
+                                CONTROLLER.ctrl = null;
                                 return;
                             }
                         }
@@ -541,8 +548,8 @@ export async function runQuestion(data, onAnswer, onError) {
                                     answer += potentialPartBeforeNew;
                                 }
                                 console.log("\nAborting completion due to max characters limit.");
-                                CONTROLLER?.abort();
-                                CONTROLLER = null;
+                                CONTROLLER.ctrl?.abort();
+                                CONTROLLER.ctrl = null;
                                 return;
                             }
                         }
@@ -554,8 +561,8 @@ export async function runQuestion(data, onAnswer, onError) {
                         for (const stopRegex of regexStopAfter) {
                             if (stopRegex.test(answer)) {
                                 console.log("\nAborting completion due to stopAfter trigger matched:", stopRegex);
-                                CONTROLLER?.abort();
-                                CONTROLLER = null;
+                                CONTROLLER.ctrl?.abort();
+                                CONTROLLER.ctrl = null;
                                 return;
                             }
                         }
@@ -588,7 +595,7 @@ export async function runQuestion(data, onAnswer, onError) {
     }
 
     onAnswer(answer);
-    CONTROLLER = null;
+    CONTROLLER.ctrl = null;
 }
 
 // TODO implement wordRejection, where rejectedWordsInNarration is expected to be "you" "your" etc... and delimiter - or emdash.
@@ -734,6 +741,10 @@ async function runPrompt(
     onDone,
     onError,
 ) {
+    if (!MODEL.model) {
+        throw new Error("Model not loaded");
+    }
+
     let bufferedText = "";
     let producedText = "";
     const BUFFERED_SIZE = 20; // buffer 20 characters
@@ -798,8 +809,8 @@ async function runPrompt(
                         onToken(potentialPartBeforeNew);
                     }
                     console.log("\nAborting completion due to max paragraphs limit.");
-                    CONTROLLER?.abort();
-                    CONTROLLER = null;
+                    CONTROLLER.ctrl?.abort();
+                    CONTROLLER.ctrl = null;
                     earlyAbort = true;
                     return;
                 }
@@ -821,8 +832,8 @@ async function runPrompt(
                         onToken(potentialPartBeforeNew);
                     }
                     console.log("\nAborting completion due to max characters limit.");
-                    CONTROLLER?.abort();
-                    CONTROLLER = null;
+                    CONTROLLER.ctrl?.abort();
+                    CONTROLLER.ctrl = null;
                     earlyAbort = true;
                     return;
                 }
@@ -835,8 +846,8 @@ async function runPrompt(
             if (characterCount >= data.maxSafetyCharacters) {
                 console.log("\nAborting completion due to max safety characters limit.");
                 onToken(bufferedText);
-                CONTROLLER?.abort();
-                CONTROLLER = null;
+                CONTROLLER.ctrl?.abort();
+                CONTROLLER.ctrl = null;
                 earlyAbort = true;
                 return;
             }
@@ -846,8 +857,8 @@ async function runPrompt(
             for (const stopRegex of regexStopAfter) {
                 if (stopRegex.test(producedText)) {
                     console.log("\nAborting completion due to stopAfter trigger matched:", stopRegex);
-                    CONTROLLER?.abort();
-                    CONTROLLER = null;
+                    CONTROLLER.ctrl?.abort();
+                    CONTROLLER.ctrl = null;
                     earlyAbort = true;
                     return;
                 }
@@ -876,8 +887,8 @@ async function runPrompt(
                     const textAfterBadWord = bufferedText.slice(indexBadWordFound + word.length);
 
                     console.log(`\nAborting completion due to forbidden word detected: ${word}`);
-                    CONTROLLER?.abort();
-                    CONTROLLER = null;
+                    CONTROLLER.ctrl?.abort();
+                    CONTROLLER.ctrl = null;
 
                     const newData = { ...data };
                     newData.grammar = postGrammar;
@@ -913,10 +924,10 @@ async function runPrompt(
 
     let context = null;
     let completion = null;
-    CONTROLLER = new AbortController();
+    CONTROLLER.ctrl = new AbortController();
     try {
         // Create context and completion for raw text
-        context = await MODEL.createContext();
+        context = await MODEL.model.createContext();
         completion = new LlamaCompletion({
             contextSequence: context.getSequence()
         });
@@ -928,7 +939,7 @@ async function runPrompt(
 
         await completion.generateCompletion(prompt, {
             ...basicConfig,
-            signal: CONTROLLER.signal,
+            signal: CONTROLLER.ctrl.signal,
             stopOnAbortSignal: true,
             grammar,
             onTextChunk(textSrc) {
@@ -958,7 +969,7 @@ async function runPrompt(
     console.log("");
 
     if (failedDueToBadWordReprocessArgs) {
-        CONTROLLER = null;
+        CONTROLLER.ctrl = null;
         console.log("\nReprocessing due to forbidden word detected...");
         await runPrompt(
             // @ts-ignore typescript is wrong
@@ -977,5 +988,5 @@ async function runPrompt(
     }
 
     onDone();
-    CONTROLLER = null;
+    CONTROLLER.ctrl = null;
 }

@@ -176,6 +176,12 @@ Development mode will make the server secret to become `dev-secret-12345678900ab
 
 `0` or `1`, Default is `0`, if set to `1` the server will run with SSL, you may want to run `create-ssl-keys.sh` to create the keys for the server.
 
+### NO_UNLOAD_MODEL
+
+`0` or `1`, Default is `0`, if set to `1` the server will not allow the client to unload the model.
+
+This is only available in the NodeJS server, the Python VLLM server does not support unloading models.
+
 ## Secret File
 
 Initializing a server will create a secret file that contains the API secret, it exists at the same directory as the server script and is named `secret`, you can read the secret from this file to connect to the server, or you can set the `DEV` environment variable to `1` to use the development secret.

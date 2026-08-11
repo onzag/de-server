@@ -194,6 +194,10 @@ async def handle_client(websocket):
                     if internal_request_id is not None:
                         base.MODEL.abort_request(internal_request_id)
                         requestid_to_rid.pop(internal_request_id, None)  # Remove from active requests
+                elif data.get('action') == 'unload-model':
+                    await websocket.send(json.dumps({"type": "error", "rid": rid, "message": "Unload model action is not supported in this server"}))
+                elif data.get('action') == 'load-model':
+                    await websocket.send(json.dumps({"type": "error", "rid": rid, "message": "Load model action is not supported in this server"}))
             except Exception as e:
                 print(str(e))
                 await websocket.send(json.dumps({"type": "error", "rid": rid, "message": str(e)}))

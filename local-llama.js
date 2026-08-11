@@ -6,7 +6,7 @@
 
 // @ts-ignore
 import { WebSocketServer } from "ws";
-import { CONTROLLER, MODEL, MODEL_PATH, generateCompletion, prepareAnalysis, runQuestion, loadConfig } from "./base.js";
+import { CONTROLLER, MODEL, MODEL_PATH, generateCompletion, prepareAnalysis, runQuestion, loadConfig, loadModel } from "./base.js";
 // @ts-ignore
 import { readFileSync, writeFileSync, existsSync } from "fs";
 // @ts-ignore
@@ -172,14 +172,14 @@ server.on("request", (req, res) => {
         DEV_MODE: DEV ? "DEV (insecure secret)" : "production",
         SSL_MODE: SSL ? "enabled" : "disabled",
         MODEL_LOADED: MODEL ? "yes" : "no",
-        MODEL_PATH: escapeHtml(MODEL_PATH || "(none)"),
+        MODEL_PATH: escapeHtml(MODEL_PATH.path || "(none)"),
         CONFIG_PATH: escapeHtml(ARG_CONFIG_PATH || "(none)"),
-// @ts-ignore
+        // @ts-ignore
         CONFIG_MODE: escapeHtml(process.env.CONFIG_MODE || "(see config file)"),
         END_TOKEN: escapeHtml(END_TOKEN || ""),
         SUPPORTED_LANGUAGES: escapeHtml(SUPPORTED_LANGUAGES.join(", ") || "(none)"),
         CONTEXT_WINDOW: String(CONTEXT_WINDOW_SIZE),
-// @ts-ignore
+        // @ts-ignore
         GPU: escapeHtml(process.env.GPU || "auto"),
         UPTIME: formatUptime(Date.now() - SERVER_START_TIME),
         PROGRAM: "Node.js Local LLaMA Server",
@@ -224,7 +224,7 @@ wss.on('connection', (ws) => {
                 if (!data.payload) {
                     throw new Error("Invalid payload for infer");
                 }
-                lastGenerationPromise = lastGenerationPromise.catch(() => {}).then(() => {
+                lastGenerationPromise = lastGenerationPromise.catch(() => { }).then(() => {
                     return generateCompletion(data.payload, (text) => {
                         ws.send(JSON.stringify({ type: 'token', rid, text }));
                     }, () => {
@@ -238,7 +238,7 @@ wss.on('connection', (ws) => {
                 if (!data.payload) {
                     throw new Error("Invalid payload for analyze-prepare");
                 }
-                lastGenerationPromise = lastGenerationPromise.catch(() => {}).then(() => {
+                lastGenerationPromise = lastGenerationPromise.catch(() => { }).then(() => {
                     return prepareAnalysis(data.payload, () => {
                         ws.send(JSON.stringify({ type: 'analyze-ready', rid }));
                     }, (error) => {
@@ -250,7 +250,7 @@ wss.on('connection', (ws) => {
                 if (!data.payload) {
                     throw new Error("Invalid payload for analyze-question");
                 }
-                lastGenerationPromise = lastGenerationPromise.catch(() => {}).then(() => {
+                lastGenerationPromise = lastGenerationPromise.catch(() => { }).then(() => {
                     return runQuestion(data.payload, (text) => {
                         ws.send(JSON.stringify({ type: 'answer', rid, text }));
                     }, (error) => {
@@ -262,8 +262,11 @@ wss.on('connection', (ws) => {
                 if (!data.payload || typeof data.payload.text !== "string") {
                     throw new Error("Invalid payload for count-tokens");
                 }
+                if (!MODEL.model) {
+                    throw new Error("Model not loaded");
+                }
                 const text = data.payload.text;
-                const tokens = MODEL.tokenize(text);
+                const tokens = MODEL.model.tokenize(text);
                 ws.send(JSON.stringify({ type: 'count', rid, n_tokens: tokens.length }));
             } else if (data.action === 'cancel') {
                 if (!data.rid) {
@@ -272,13 +275,44 @@ wss.on('connection', (ws) => {
                 if (data.rid === "no-rid") {
                     throw new Error("Cannot cancel request with no rid");
                 }
-                if (CONTROLLER) {
-                    CONTROLLER.abort();
+                if (CONTROLLER.ctrl) {
+                    CONTROLLER.ctrl.abort();
                     // Cancel the request with the given rid
                     // This will depend on how you track active requests and their IDs
                     ws.send(JSON.stringify({ type: "cancelled", rid: data.rid }));
                 } else {
                     ws.send(JSON.stringify({ type: "error", rid, message: "No active controller to cancel" }));
+                }
+            } else if (data.action === 'unload-model') {
+                // @ts-ignore
+                if (process.env.NO_UNLOAD_MODEL === "1") {
+                    ws.send(JSON.stringify({ type: 'error', rid, message: 'Unloading models is disabled by server configuration' }));
+                } else {
+                    console.log("Unloading model on request from client");
+                    if (CONTROLLER.ctrl) {
+                        CONTROLLER.ctrl.abort();
+                        CONTROLLER.ctrl = null;
+                    }
+                    if (MODEL.model) {
+                        await MODEL.model.dispose();
+                        MODEL.model = null;
+                        ws.send(JSON.stringify({ type: 'model-unloaded', rid }));
+                    } else {
+                        ws.send(JSON.stringify({ type: 'error', rid, message: 'No model loaded to unload' }));
+                    }
+                }
+            } else if (data.action === 'reload-model') {
+                // @ts-ignore
+                if (process.env.NO_UNLOAD_MODEL === "1") {
+                    ws.send(JSON.stringify({ type: 'error', rid, message: 'Unloading models is disabled by server configuration' }));
+                } else if (MODEL.model) {
+                    ws.send(JSON.stringify({ type: 'error', rid, message: 'Model is already loaded, please unload it first before reloading' }));
+                } else {
+                    if (!MODEL_PATH.path) {
+                        throw new Error("No model path set to reload");
+                    }
+                    await loadModel(MODEL_PATH.path);
+                    ws.send(JSON.stringify({ type: 'model-reloaded', rid }));
                 }
             } else {
                 throw new Error("Unknown action: " + data.action);
@@ -293,8 +327,8 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         console.log('Client disconnected');
-        if (CONTROLLER) {
-            CONTROLLER.abort();
+        if (CONTROLLER.ctrl) {
+            CONTROLLER.ctrl.abort();
         }
     });
 });
