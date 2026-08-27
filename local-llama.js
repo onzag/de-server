@@ -301,18 +301,18 @@ wss.on('connection', (ws) => {
                         ws.send(JSON.stringify({ type: 'error', rid, message: 'No model loaded to unload' }));
                     }
                 }
-            } else if (data.action === 'reload-model') {
+            } else if (data.action === 'load-model') {
                 // @ts-ignore
                 if (process.env.NO_UNLOAD_MODEL === "1") {
                     ws.send(JSON.stringify({ type: 'error', rid, message: 'Unloading models is disabled by server configuration' }));
                 } else if (MODEL.model) {
-                    ws.send(JSON.stringify({ type: 'error', rid, message: 'Model is already loaded, please unload it first before reloading' }));
+                    ws.send(JSON.stringify({ type: 'model-loaded', rid }));
                 } else {
                     if (!MODEL_PATH.path) {
                         throw new Error("No model path set to reload");
                     }
                     await loadModel(MODEL_PATH.path);
-                    ws.send(JSON.stringify({ type: 'model-reloaded', rid }));
+                    ws.send(JSON.stringify({ type: 'model-loaded', rid }));
                 }
             } else {
                 throw new Error("Unknown action: " + data.action);

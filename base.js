@@ -284,6 +284,8 @@ export async function loadConfig(configPath) {
         await loadModel(modelFullPath);
     }
 
+    console.log("Supported languages:", CONFIG.supportedLanguages || []);
+
     return { endToken: getMode(CONFIG.mode).endToken, supportedLanguages: CONFIG.supportedLanguages || [] };
 }
 
