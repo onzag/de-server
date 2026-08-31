@@ -238,6 +238,11 @@ async def process_request(connection, request):
         ]
         return (200, headers, body)
 
+    # Any plain HTTP request on an unknown path (e.g. /favicon.ico) gets a
+    # silent 404. Only WebSocket upgrade requests proceed to auth.
+    if request.headers.get("Upgrade", "").lower() != "websocket":
+        return connection.respond(HTTPStatus.NOT_FOUND, "Not found")
+
     query_params = parse_qs(parsed.query)
     secret = query_params.get('secret', [None])[0]
 
