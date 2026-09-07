@@ -522,6 +522,8 @@ async def run_question(
         raise ValueError("Invalid maxParagraphs format")
     if not isinstance(data.get("maxCharacters"), (int, float)) or data["maxCharacters"] < 0:
         raise ValueError("Invalid maxCharacters format")
+    if not isinstance(data.get("maxCharactersCutOnDot"), bool):
+        raise ValueError("Invalid maxCharactersCutOnDot format")
     if not isinstance(data.get("maxSafetyCharacters"), (int, float)) or data["maxSafetyCharacters"] < 0:
         raise ValueError("Invalid maxSafetyCharacters format")
     if data.get("trail") is not None and not isinstance(data["trail"], str):
@@ -551,11 +553,14 @@ async def run_question(
 
     max_paragraphs = int(data["maxParagraphs"])
     max_characters = int(data["maxCharacters"])
+    max_characters_cut_on_dot = bool(data["maxCharactersCutOnDot"])
     max_safety_characters = int(data["maxSafetyCharacters"])
     if max_paragraphs:
         print("Max paragraphs limit set to: " + str(max_paragraphs))
     if max_characters:
         print("Max characters limit set to: " + str(max_characters))
+    if max_characters_cut_on_dot:
+        print("Max characters cut on dot set to: " + str(max_characters_cut_on_dot))
     if max_safety_characters:
         print("Max safety characters limit set to: " + str(max_safety_characters))
 
@@ -605,6 +610,12 @@ async def run_question(
                     print("\nAborting completion due to max characters limit " + str(max_characters) + ".")
                     await MODEL.abort(request_id)
                     break
+                elif max_characters_cut_on_dot and '.' in delta:
+                    part_before = delta.split('.')[0]
+                    answer = answer[:len(answer) - len(delta)] + part_before
+                    print("\nAborting completion due to max characters limit (cut on dot) " + str(max_characters) + ".")
+                    await MODEL.abort(request_id)
+                    break
 
             if max_safety_characters > 0 and len(answer) >= max_safety_characters:
                 print("\nAborting completion due to max safety characters limit " + str(max_safety_characters) + ".")
@@ -652,6 +663,8 @@ async def generate_completion(
         raise ValueError("Invalid maxParagraphs format")
     if not isinstance(data.get("maxCharacters"), (int, float)) or data["maxCharacters"] < 0:
         raise ValueError("Invalid maxCharacters format")
+    if not isinstance(data.get("maxCharactersCutOnDot"), bool):
+        raise ValueError("Invalid maxCharactersCutOnDot format")
     if not isinstance(data.get("maxSafetyCharacters"), (int, float)) or data["maxSafetyCharacters"] < 0:
         raise ValueError("Invalid maxSafetyCharacters format")
     if data.get("trail") is not None and not isinstance(data["trail"], str):
@@ -679,11 +692,14 @@ async def generate_completion(
 
     max_paragraphs = int(data["maxParagraphs"])
     max_characters = int(data["maxCharacters"])
+    max_characters_cut_on_dot = bool(data["maxCharactersCutOnDot"])
     max_safety_characters = int(data["maxSafetyCharacters"])
     if max_paragraphs:
         print("Max paragraphs limit set to: " + str(max_paragraphs))
     if max_characters:
         print("Max characters limit set to: " + str(max_characters))
+    if max_characters_cut_on_dot:
+        print("Max characters cut on dot set to: " + str(max_characters_cut_on_dot))
     if max_safety_characters:
         print("Max safety characters limit set to: " + str(max_safety_characters))
 
@@ -750,6 +766,13 @@ async def generate_completion(
                     if part_before:
                         yield {"token": part_before}
                     print("\nAborting completion due to max characters limit.")
+                    await MODEL.abort(request_id)
+                    break
+                elif max_characters_cut_on_dot and '.' in delta:
+                    part_before = delta.split('.')[0]
+                    if part_before:
+                        yield {"token": part_before}
+                    print("\nAborting completion due to max characters limit (cut on dot).")
                     await MODEL.abort(request_id)
                     break
 

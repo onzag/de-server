@@ -224,6 +224,9 @@ wss.on('connection', (ws) => {
                 if (!data.payload) {
                     throw new Error("Invalid payload for infer");
                 }
+                if (lastGenerationPromise && lastGenerationPromise !== Promise.resolve()) {
+                    await lastGenerationPromise.catch(() => { }).then(() => { }); // Wait for the previous generation to finish
+                }
                 lastGenerationPromise = lastGenerationPromise.catch(() => { }).then(() => {
                     return generateCompletion(data.payload, (text) => {
                         ws.send(JSON.stringify({ type: 'token', rid, text }));
@@ -238,6 +241,9 @@ wss.on('connection', (ws) => {
                 if (!data.payload) {
                     throw new Error("Invalid payload for analyze-prepare");
                 }
+                if (lastGenerationPromise && lastGenerationPromise !== Promise.resolve()) {
+                    await lastGenerationPromise.catch(() => { }).then(() => { }); // Wait for the previous generation to finish
+                }
                 lastGenerationPromise = lastGenerationPromise.catch(() => { }).then(() => {
                     return prepareAnalysis(data.payload, () => {
                         ws.send(JSON.stringify({ type: 'analyze-ready', rid }));
@@ -249,6 +255,9 @@ wss.on('connection', (ws) => {
             } else if (data.action === 'analyze-question') {
                 if (!data.payload) {
                     throw new Error("Invalid payload for analyze-question");
+                }
+                if (lastGenerationPromise && lastGenerationPromise !== Promise.resolve()) {
+                    await lastGenerationPromise.catch(() => { }).then(() => { }); // Wait for the previous generation to finish
                 }
                 lastGenerationPromise = lastGenerationPromise.catch(() => { }).then(() => {
                     return runQuestion(data.payload, (text) => {
@@ -284,6 +293,10 @@ wss.on('connection', (ws) => {
                     ws.send(JSON.stringify({ type: "error", rid, message: "No active controller to cancel" }));
                 }
             } else if (data.action === 'unload-model') {
+                if (lastGenerationPromise && lastGenerationPromise !== Promise.resolve()) {
+                    await lastGenerationPromise.catch(() => { }).then(() => { }); // Wait for the previous generation to finish
+                }
+                
                 // @ts-ignore
                 if (process.env.NO_UNLOAD_MODEL === "1") {
                     ws.send(JSON.stringify({ type: 'error', rid, message: 'Unloading models is disabled by server configuration' }));

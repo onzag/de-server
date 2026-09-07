@@ -59,6 +59,18 @@ const { LlamaCompletion, getLlama } = await import('node-llama-cpp');
 // @ts-ignore
 import path from 'path';
 
+// @ts-ignore
+let CONTEXT_WINDOW_SIZE = 2048 * 4; // 8k context default
+// @ts-ignore
+if (process.env.CONTEXT_WINDOW_SIZE) {
+    // @ts-ignore
+    const envSize = parseInt(process.env.CONTEXT_WINDOW_SIZE);
+    if (!isNaN(envSize) && envSize > 0) {
+        CONTEXT_WINDOW_SIZE = envSize;
+    }
+}
+console.log("Context window size:", CONTEXT_WINDOW_SIZE);
+
 /**
  * Chat-template registry. Each mode describes how to format prompts and
  * which strings should act as stop triggers for the given model family.
@@ -323,8 +335,11 @@ export async function loadModel(model) {
 
 // @ts-ignore
 const DEBUG = process.env.DEBUG === "1";
+// @ts-ignore
+const DEBUG_MODE = process.env.DEBUG_MODE || "default";
 
-console.log("DEBUG mode:", DEBUG);
+console.log("DEBUG:", DEBUG);
+console.log("DEBUG_MODE:", DEBUG_MODE);
 
 /**
  * @type {import('node-llama-cpp').Token[] | null}
@@ -370,7 +385,7 @@ export async function prepareAnalysis(data, onDone, onError) {
         // TODO optimize this, for now just retokenize every time
         ANALYSIS_TEXT = getMode(CONFIG.mode).analysisPrefix(data.system, data.userTrail);
 
-        if (DEBUG) {
+        if (DEBUG && DEBUG_MODE === "default") {
             console.log("Prepared analysis text:", ANALYSIS_TEXT);
         }
         onDone();
@@ -388,6 +403,7 @@ export async function prepareAnalysis(data, onDone, onError) {
  * stopAfter: Array<string>;
  * maxParagraphs: number;
  * maxCharacters: number;
+ * maxCharactersCutOnDot: boolean;
  * maxSafetyCharacters: number;
  * trail: string | null;
  * grammar: string | null;
@@ -428,6 +444,10 @@ export async function runQuestion(data, onAnswer, onError) {
 
     if (typeof data.maxCharacters !== "number" || isNaN(data.maxCharacters) || data.maxCharacters < 0) {
         throw new Error("Invalid maxCharacters format");
+    }
+
+    if (typeof data.maxCharactersCutOnDot !== "boolean") {
+        throw new Error("Invalid maxCharactersCutOnDot format");
     }
 
     if (typeof data.maxSafetyCharacters !== "number" || isNaN(data.maxSafetyCharacters) || data.maxSafetyCharacters < 0) {
@@ -477,17 +497,20 @@ export async function runQuestion(data, onAnswer, onError) {
         if (CONFIG_TO_USE.temperatureRange) {
             basicConfig.temperature = getDynamicTemperature(CONFIG_TO_USE.temperatureRange[0], CONFIG_TO_USE.temperatureRange[1]);
         }
-        if (typeof data.maxParagraphs === "number" && DEBUG) {
+        if (typeof data.maxParagraphs === "number" && DEBUG && DEBUG_MODE === "default") {
             console.log("Max paragraphs limit set to:", data.maxParagraphs);
         }
-        if (typeof data.maxCharacters === "number" && DEBUG) {
+        if (typeof data.maxCharacters === "number" && DEBUG && DEBUG_MODE === "default") {
             console.log("Max characters limit set to:", data.maxCharacters);
+        }
+        if (typeof data.maxCharactersCutOnDot === "boolean" && DEBUG && DEBUG_MODE === "default") {
+            console.log("Max characters cut on dot set to:", data.maxCharactersCutOnDot);
         }
         // TODO add XTC and dry sampling options from config
 
         let accumulatedText = "";
 
-        if (DEBUG) {
+        if (DEBUG && DEBUG_MODE === "default") {
             console.log("Generation config:", basicConfig);
             console.log("Prompt:", prompt);
             console.log("Using grammar:", data.grammar);
@@ -503,7 +526,7 @@ export async function runQuestion(data, onAnswer, onError) {
                     const text = textSrc;
                     accumulatedText += text;
 
-                    if (DEBUG) {
+                    if (DEBUG && (DEBUG_MODE === "default" || DEBUG_MODE === "output")) {
                         // use this weird character to denote token boundaries
                         // @ts-ignore
                         process.stdout.write(text + "§");
@@ -550,6 +573,15 @@ export async function runQuestion(data, onAnswer, onError) {
                                     answer += potentialPartBeforeNew;
                                 }
                                 console.log("\nAborting completion due to max characters limit.");
+                                CONTROLLER.ctrl?.abort();
+                                CONTROLLER.ctrl = null;
+                                return;
+                            } else if (data.maxCharactersCutOnDot && text.indexOf('.') !== -1) {
+                                const potentialPartBeforeDot = text.split('.')[0];
+                                if (potentialPartBeforeDot.length > 0) {
+                                    answer += potentialPartBeforeDot;
+                                }
+                                console.log("\nAborting completion due to max characters limit (cut on dot).");
                                 CONTROLLER.ctrl?.abort();
                                 CONTROLLER.ctrl = null;
                                 return;
@@ -620,6 +652,7 @@ export async function runQuestion(data, onAnswer, onError) {
  * @property {number} maxParagraphs - The maximum number of paragraphs to generate.
  * @property {number} maxCharacters - The maximum number of characters to generate.
  * @property {number} maxSafetyCharacters - The maximum number of characters to generate before stopping for safety.
+ * @property {boolean} maxCharactersCutOnDot - Whether to cut on dot when max characters is reached, not just newline
  * @property {string | null} trail - The trailing text to append to the prompt.
  * @property {string} gear - The gear to use for generation (standard or analyze).
  * @property {string | null} grammar - The grammar to use for generation.
@@ -633,7 +666,7 @@ export async function runQuestion(data, onAnswer, onError) {
  * @param {(error: Error) => void} onError 
  */
 export async function generateCompletion(data, onToken, onDone, onError) {
-    if (CONTROLLER) {
+    if (CONTROLLER.ctrl) {
         throw new Error("Another generation is already in progress");
     }
 
@@ -661,6 +694,10 @@ export async function generateCompletion(data, onToken, onDone, onError) {
 
     if (typeof data.maxCharacters !== "number" || isNaN(data.maxCharacters) || data.maxCharacters < 0) {
         throw new Error("Invalid maxCharacters format");
+    }
+
+    if (typeof data.maxCharactersCutOnDot !== "boolean") {
+        throw new Error("Invalid maxCharactersCutOnDot format");
     }
 
     if (typeof data.maxSafetyCharacters !== "number" || isNaN(data.maxSafetyCharacters) || data.maxSafetyCharacters < 0) {
@@ -715,11 +752,15 @@ export async function generateCompletion(data, onToken, onDone, onError) {
     if (CONFIG.standard.temperatureRange) {
         basicConfig.temperature = getDynamicTemperature(CONFIG.standard.temperatureRange[0], CONFIG.standard.temperatureRange[1]);
     }
-    if (typeof data.maxParagraphs === "number" && DEBUG) {
+    if (typeof data.maxParagraphs === "number" && DEBUG && DEBUG_MODE === "default") {
         console.log("Max paragraphs limit set to:", data.maxParagraphs);
     }
-    if (typeof data.maxCharacters === "number" && DEBUG) {
+    if (typeof data.maxCharacters === "number" && DEBUG && DEBUG_MODE === "default") {
         console.log("Max characters limit set to:", data.maxCharacters);
+    }
+
+    if (typeof data.maxCharactersCutOnDot === "boolean" && DEBUG && DEBUG_MODE === "default") {
+        console.log("Max characters cut on dot set to:", data.maxCharactersCutOnDot);
     }
 
     return await runPrompt(prompt, data, basicConfig, onToken, onDone, onError);
@@ -773,7 +814,7 @@ async function runPrompt(
         bufferedText += text;
         producedText += text;
 
-        if (DEBUG) {
+        if (DEBUG && (DEBUG_MODE === "default" || DEBUG_MODE === "output")) {
             // use this weird character to denote token boundaries
             // @ts-ignore
             process.stdout.write(text + "§");
@@ -934,7 +975,7 @@ async function runPrompt(
             contextSequence: context.getSequence()
         });
 
-        if (DEBUG) {
+        if (DEBUG && DEBUG_MODE === "default") {
             console.log("Generation config:", basicConfig);
             console.log("Prompt:", prompt);
         }
