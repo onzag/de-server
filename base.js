@@ -879,6 +879,16 @@ async function runPrompt(
                     CONTROLLER.ctrl = null;
                     earlyAbort = true;
                     return;
+                } else if (data.maxCharactersCutOnDot && text.indexOf('.') !== -1) {
+                    const potentialPartBeforeDot = bufferedText.split('.')[0];
+                    if (potentialPartBeforeDot.length > 0) {
+                        onToken(potentialPartBeforeDot + '.');
+                    }
+                    console.log("\nAborting completion due to max characters limit (cut on dot).");
+                    CONTROLLER.ctrl?.abort();
+                    CONTROLLER.ctrl = null;
+                    earlyAbort = true;
+                    return;
                 }
             }
         }
