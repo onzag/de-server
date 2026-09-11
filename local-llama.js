@@ -311,7 +311,7 @@ wss.on('connection', (ws) => {
                         MODEL.model = null;
                         ws.send(JSON.stringify({ type: 'model-unloaded', rid }));
                     } else {
-                        ws.send(JSON.stringify({ type: 'error', rid, message: 'No model loaded to unload' }));
+                        ws.send(JSON.stringify({ type: 'model-unloaded', rid }));
                     }
                 }
             } else if (data.action === 'load-model') {
